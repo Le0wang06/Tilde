@@ -30,11 +30,13 @@ final class MenuBarStatusItemController: NSObject {
             let popover = NSPopover()
             popover.behavior = .transient
             popover.animates = true
-            popover.contentSize = NSSize(width: 380, height: 460)
-            popover.contentViewController = NSHostingController(
+            popover.contentSize = NSSize(width: 388, height: 520)
+            let host = NSHostingController(
                 rootView: MenuBarPanel()
                     .environmentObject(model)
             )
+            host.view.wantsLayer = true
+            popover.contentViewController = host
             self.popover = popover
         }
 
