@@ -52,9 +52,9 @@ public actor CodexAppServerProbe: MetricProvider {
     }
 
     private static func runProbe(environment: [String: String]) throws -> CodexDiagnosticSnapshot {
-        let executablePath = try commandOutput(executable: "/usr/bin/which", arguments: ["codex"], environment: environment)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !executablePath.isEmpty else { throw MetricError.executableNotFound("Codex") }
+        guard let executablePath = CodexExecutableLocator.locate(environment: environment) else {
+            throw MetricError.executableNotFound("Codex")
+        }
 
         let version = try commandOutput(executable: executablePath, arguments: ["--version"], environment: environment)
             .trimmingCharacters(in: .whitespacesAndNewlines)

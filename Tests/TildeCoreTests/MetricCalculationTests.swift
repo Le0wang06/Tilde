@@ -46,3 +46,13 @@ import Testing
     #expect(CodexRateLimitWindow(usedPercent: 120, resetsAt: nil, durationMinutes: nil).remainingPercent == 0)
     #expect(CodexRateLimitWindow(usedPercent: -10, resetsAt: nil, durationMinutes: nil).remainingPercent == 100)
 }
+
+@Test func codexLocatorIncludesUserLocalPathWithoutShellPath() {
+    let candidates = CodexExecutableLocator.candidatePaths(environment: [
+        "HOME": "/Users/example",
+        "PATH": "/usr/bin:/bin",
+    ])
+
+    #expect(candidates.contains("/Users/example/.local/bin/codex"))
+    #expect(candidates.contains("/opt/homebrew/bin/codex"))
+}
