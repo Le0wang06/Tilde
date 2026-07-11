@@ -33,7 +33,11 @@ public struct MemoryProvider: MetricProvider {
             throw MetricError.systemCall("host_statistics64", code: Int32(result))
         }
 
-        let pageSize = UInt64(vm_kernel_page_size)
+        var hostPageSize: vm_size_t = 0
+        guard host_page_size(mach_host_self(), &hostPageSize) == KERN_SUCCESS else {
+            throw MetricError.unavailable("Kernel page size is unavailable")
+        }
+        let pageSize = UInt64(hostPageSize)
         let total = ProcessInfo.processInfo.physicalMemory
         let freePages = UInt64(statistics.free_count + statistics.speculative_count)
         let freeBytes = min(total, freePages * pageSize)

@@ -89,7 +89,8 @@ public actor NetworkProvider: MetricProvider {
                         NI_NUMERICHOST
                     )
                     if result == 0 {
-                        selectedAddress = String(cString: host)
+                        let bytes = host.prefix { $0 != 0 }.map(UInt8.init(bitPattern:))
+                        selectedAddress = String(decoding: bytes, as: UTF8.self)
                         selectedName = name
                     }
                 }

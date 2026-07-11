@@ -6,11 +6,11 @@ public struct ThermalProvider: MetricProvider {
     public func fetchSnapshot() async throws -> TildeThermalState {
         try Task.checkCancellation()
         switch ProcessInfo.processInfo.thermalState {
-        case .nominal: .nominal
-        case .fair: .fair
-        case .serious: .serious
-        case .critical: .critical
-        @unknown default: .unavailable
+        case .nominal: return TildeThermalState.nominal
+        case .fair: return TildeThermalState.fair
+        case .serious: return TildeThermalState.serious
+        case .critical: return TildeThermalState.critical
+        @unknown default: return TildeThermalState.unavailable
         }
     }
 }
