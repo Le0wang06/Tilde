@@ -5,7 +5,17 @@ import TildeCore
 @main
 struct TildeDiagnosticsApp: App {
     @NSApplicationDelegateAdaptor(TildeAppDelegate.self) private var appDelegate
-    @StateObject private var model = DiagnosticViewModel()
+    @StateObject private var model: DiagnosticViewModel
+
+    init() {
+        let model = DiagnosticViewModel()
+        _model = StateObject(wrappedValue: model)
+        Task { @MainActor in
+            model.startIfNeeded()
+            TildeAppDelegate.shared?.model = model
+            MenuBarStatusItemController.shared.install(model: model)
+        }
+    }
 
     var body: some Scene {
         WindowGroup("Tilde", id: "diagnostics") {
@@ -14,22 +24,104 @@ struct TildeDiagnosticsApp: App {
                 .frame(minWidth: 760, minHeight: 560)
         }
         .defaultSize(width: 920, height: 780)
-
-        MenuBarExtra {
-            MenuBarPanel()
-                .environmentObject(model)
-        } label: {
-            Label("Tilde", systemImage: model.menuBarSymbol)
-        }
-        .menuBarExtraStyle(.window)
+        // Menu bar item is an AppKit NSStatusItem so the AI % text is always visible.
+        // Main window stays closed until Open is pressed in the status-item panel.
     }
 }
 
 @MainActor
 final class TildeAppDelegate: NSObject, NSApplicationDelegate {
+    static private(set) weak var shared: TildeAppDelegate?
+
+    var model: DiagnosticViewModel?
+    private var hostedMainWindow: NSWindow?
+    private var openMainWindowObserver: NSObjectProtocol?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Self.shared = self
+        // Stay in the menu bar only — don't steal focus or pop the main window.
+        NSApp.setActivationPolicy(.accessory)
+        DispatchQueue.main.async {
+            for window in NSApp.windows where window.isVisible {
+                window.orderOut(nil)
+            }
+        }
+
+        openMainWindowObserver = NotificationCenter.default.addObserver(
+            forName: .tildeOpenMainWindow,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.presentMainWindow()
+            }
+        }
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        // Dock isn't shown in accessory mode; ignore reopen.
+        false
+    }
+
+    /// Show the full diagnostics window; switches to regular activation so it can come forward.
+    func presentMainWindow() {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+
+        if let hostedMainWindow, hostedMainWindow.isVisible {
+            hostedMainWindow.makeKeyAndOrderFront(nil)
+            return
+        }
+
+        let existing = NSApp.windows.filter {
+            $0.canBecomeMain && !($0.className.contains("NSStatusBar"))
+        }
+        if let window = existing.first {
+            window.makeKeyAndOrderFront(nil)
+            return
+        }
+
+        guard let model else { return }
+        let host = NSHostingController(
+            rootView: DiagnosticContentView()
+                .environmentObject(model)
+                .frame(minWidth: 760, minHeight: 560)
+        )
+        let window = NSWindow(contentViewController: host)
+        window.title = "Tilde"
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.setContentSize(NSSize(width: 920, height: 780))
+        window.center()
+        window.isReleasedWhenClosed = false
+        window.delegate = self
+        window.makeKeyAndOrderFront(nil)
+        hostedMainWindow = window
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        // If the user closed every window, return to menu-bar-only mode.
+        let hasMain = NSApp.windows.contains {
+            $0.isVisible && $0.canBecomeMain && !($0.className.contains("NSStatusBar"))
+        }
+        if !hasMain, NSApp.activationPolicy() == .regular {
+            NSApp.setActivationPolicy(.accessory)
+        }
+    }
+}
+
+extension TildeAppDelegate: NSWindowDelegate {
+    func windowWillClose(_ notification: Notification) {
+        if notification.object as? NSWindow === hostedMainWindow {
+            hostedMainWindow = nil
+        }
+        DispatchQueue.main.async {
+            let hasMain = NSApp.windows.contains {
+                $0.isVisible && $0.canBecomeMain && !($0.className.contains("NSStatusBar"))
+            }
+            if !hasMain {
+                NSApp.setActivationPolicy(.accessory)
+            }
+        }
     }
 }
 
@@ -38,9 +130,14 @@ final class DiagnosticViewModel: ObservableObject {
     @Published var report: DiagnosticReport?
     @Published var runState = DiagnosticRunState.idle
     @Published private(set) var history: [LiveMetricSample] = []
+    /// Compact Codex remaining % shown in the macOS menu bar title.
+    @Published private(set) var menuBarTitle: String = "~ …"
+    @Published private(set) var fanBoost: FanBoostController.Snapshot = .idle
     private let liveMonitoring = LiveMonitoringService()
+    private let fanBoostController = FanBoostController()
     private var historyBuffer = LiveMetricHistory()
     private var subscriptionTask: Task<Void, Never>?
+    private let menuBarPresentationID = UUID()
 
     var menuBarSymbol: String {
         if runState == .running { return "ellipsis.circle" }
@@ -52,19 +149,66 @@ final class DiagnosticViewModel: ObservableObject {
         return "waveform.path.ecg"
     }
 
+    var isFanBoostEnabled: Bool { fanBoost.isEnabled }
+
     func startIfNeeded() {
         guard subscriptionTask == nil else { return }
         runState.apply(.start)
+        // Keep background sampling active for the menu-bar title even when
+        // the panel / window are closed.
+        Task {
+            await liveMonitoring.setPresentation(menuBarPresentationID, isActive: true)
+        }
         subscriptionTask = Task { [weak self] in
             guard let self else { return }
             let reports = await liveMonitoring.reports()
             for await report in reports {
                 guard !Task.isCancelled else { break }
-                self.report = report
-                self.historyBuffer.append(LiveMetricSample(snapshot: report.system))
-                self.history = self.historyBuffer.samples
-                self.runState.apply(.finish)
+                self.apply(report: report)
             }
+        }
+    }
+
+    private func apply(report: DiagnosticReport) {
+        self.report = report
+        historyBuffer.append(LiveMetricSample(snapshot: report.system))
+        history = historyBuffer.samples
+        menuBarTitle = Self.makeMenuBarTitle(from: report.codex)
+        MenuBarStatusItemController.shared.updateTitle(menuBarTitle)
+        NotificationCenter.default.post(
+            name: .tildeMenuBarTitleDidChange,
+            object: nil,
+            userInfo: ["title": menuBarTitle]
+        )
+        if fanBoost.isEnabled {
+            Task {
+                let snapshot = await fanBoostController.currentSnapshot(thermalState: report.system.thermalState)
+                await MainActor.run { self.fanBoost = snapshot }
+            }
+        }
+        runState.apply(.finish)
+    }
+
+    private static func makeMenuBarTitle(from codex: Availability<CodexDiagnosticSnapshot>) -> String {
+        guard case .available(let snapshot) = codex else {
+            return "~ —"
+        }
+
+        let remaining = snapshot.primaryLimit.map { "\($0.remainingPercent)%" } ?? "—"
+        let tokens: String
+        if let tokensToday = snapshot.tokensToday {
+            tokens = tokensToday.formatted(.number.notation(.compactName))
+        } else {
+            tokens = "—"
+        }
+        return "~ \(remaining) · \(tokens)"
+    }
+
+    func setFanBoostEnabled(_ enabled: Bool) {
+        let thermal = report?.system.thermalState ?? .unavailable
+        Task {
+            let snapshot = await fanBoostController.setEnabled(enabled, thermalState: thermal)
+            await MainActor.run { self.fanBoost = snapshot }
         }
     }
 
@@ -415,139 +559,332 @@ private struct DiagnosticContentView: View {
     }
 }
 
-private struct MenuBarPanel: View {
+struct MenuBarPanel: View {
     @EnvironmentObject private var model: DiagnosticViewModel
-    @Environment(\.openWindow) private var openWindow
     @State private var presentationID = UUID()
+    @Environment(\.colorScheme) private var colorScheme
+
+    private let panelWidth: CGFloat = 360
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                Circle()
-                    .fill(panelStatusColor)
-                    .frame(width: 9, height: 9)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Tilde")
-                        .font(.headline)
-                    Text(statusText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                if model.runState == .running {
-                    ProgressView()
-                        .controlSize(.small)
-                }
+        VStack(spacing: 10) {
+            header
+
+            if let report = model.report {
+                metricGrid(report)
+                actionRow
+                footerBar
+            } else {
+                ProgressView("Collecting…")
+                    .controlSize(.small)
+                    .frame(maxWidth: .infinity, minHeight: 120)
             }
-            .padding(16)
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 14) {
-                if let report = model.report {
-                    Text("Performance")
-                        .font(.headline)
-                    performanceBars(report)
-                    LiveResourceChart(samples: model.history, compact: true)
-                    Divider()
-                    networkRows(report.system.network)
-                } else {
-                    Text("Collecting diagnostics...")
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, minHeight: 120)
-                }
-            }
-            .padding(16)
-
-            Divider()
-
-            HStack(spacing: 8) {
-                Button {
-                    openWindow(id: "diagnostics")
-                    NSApp.activate(ignoringOtherApps: true)
-                } label: {
-                    Label("Open Tilde", systemImage: "macwindow")
-                }
-
-                Spacer()
-
-                Button {
-                    model.refresh()
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .help("Run Diagnostics")
-                .disabled(model.runState == .running)
-
-                Button {
-                    NSApp.terminate(nil)
-                } label: {
-                    Image(systemName: "power")
-                }
-                .help("Quit Tilde")
-            }
-            .padding(12)
         }
-        .frame(width: 380)
+        .padding(12)
+        .frame(width: panelWidth)
+        .fixedSize(horizontal: true, vertical: true)
+        .background {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(.ultraThinMaterial)
+        }
         .onAppear { model.setPresentation(presentationID, isActive: true) }
         .onDisappear { model.setPresentation(presentationID, isActive: false) }
     }
 
-    @ViewBuilder
-    private func performanceBars(_ report: DiagnosticReport) -> some View {
-        if case .available(let cpu) = report.system.cpu {
-            MetricBar(
-                label: "CPU",
-                value: percent(cpu.usagePercent),
-                fraction: cpu.usagePercent / 100,
-                color: MetricColor.utilization(cpu.usagePercent)
-            )
-        } else {
-            MetricBar(label: "CPU", value: "Unavailable", fraction: nil, color: .secondary)
+    private var header: some View {
+        HStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(panelStatusColor.opacity(0.18))
+                    .frame(width: 28, height: 28)
+                Text("~")
+                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .foregroundStyle(panelStatusColor)
+            }
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Tilde")
+                    .font(.headline)
+                Text(statusText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            if model.runState == .running {
+                ProgressView()
+                    .controlSize(.small)
+            }
         }
-
-        if case .available(let memory) = report.system.memory, memory.totalBytes > 0 {
-            let usage = Double(memory.usedBytes) / Double(memory.totalBytes) * 100
-            MetricBar(
-                label: "Memory",
-                value: percent(usage),
-                fraction: usage / 100,
-                color: memory.pressure == .unavailable ? MetricColor.utilization(usage) : MetricColor.memoryPressure(memory.pressure),
-                detail: memory.pressure.rawValue.capitalized
-            )
-        } else {
-            MetricBar(label: "Memory", value: "Unavailable", fraction: nil, color: .secondary)
-        }
-
-        if case .available(let codex) = report.codex, let remaining = codex.primaryLimit?.remainingPercent {
-            MetricBar(
-                label: "Codex",
-                value: "\(remaining)% remaining",
-                fraction: Double(remaining) / 100,
-                color: MetricColor.remaining(remaining)
-            )
-        } else {
-            MetricBar(label: "Codex", value: "Unavailable", fraction: nil, color: .secondary)
-        }
+        .padding(.horizontal, 4)
+        .padding(.top, 2)
     }
 
     @ViewBuilder
-    private func networkRows(_ availability: Availability<NetworkReading>) -> some View {
-        if case .available(let network) = availability {
-            HStack(spacing: 20) {
-                Label(network.downloadBytesPerSecond.map(rate) ?? "--", systemImage: "arrow.down")
-                    .foregroundStyle(.green)
-                Label(network.uploadBytesPerSecond.map(rate) ?? "--", systemImage: "arrow.up")
-                    .foregroundStyle(.purple)
-                Spacer()
-                Text(network.interfaceName ?? "Offline")
-                    .foregroundStyle(.secondary)
+    private func metricGrid(_ report: DiagnosticReport) -> some View {
+        // Two independent columns avoid Grid row height matching, which left
+        // empty space under the shorter CPU card before FAN started.
+        VStack(spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                VStack(spacing: 10) {
+                    cpuCard(report)
+                    fanCard
+                }
+                .frame(maxWidth: .infinity, alignment: .top)
+
+                VStack(spacing: 10) {
+                    memoryCard(report)
+                    storageCard(report)
+                    networkCard(report.system.network)
+                }
+                .frame(maxWidth: .infinity, alignment: .top)
             }
-            .font(.caption)
-        } else {
-            Text("Network unavailable")
-                .font(.caption)
+
+            codexCard(report)
+        }
+    }
+
+    private func cpuCard(_ report: DiagnosticReport) -> some View {
+        ControlCenterCard {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "cpu")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text("CPU")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(cpuPercentText(report))
+                        .font(.caption.weight(.semibold).monospacedDigit())
+                }
+
+                LiveResourceChart(samples: model.history, compact: true)
+                    .frame(height: 72)
+
+                if case .available(let cpu) = report.system.cpu {
+                    ColorBar(fraction: cpu.usagePercent / 100, color: .blue)
+                }
+            }
+        }
+    }
+
+    private func memoryCard(_ report: DiagnosticReport) -> some View {
+        ControlCenterCard {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "memorychip")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text("RAM")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                }
+                if case .available(let memory) = report.system.memory, memory.totalBytes > 0 {
+                    let usage = Double(memory.usedBytes) / Double(memory.totalBytes)
+                    Text(percent(usage * 100))
+                        .font(.title3.weight(.semibold).monospacedDigit())
+                    Text("U: \(bytes(memory.usedBytes))  T: \(bytes(memory.totalBytes))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                    ColorBar(
+                        fraction: usage,
+                        color: memory.pressure == .unavailable
+                            ? .blue
+                            : MetricColor.memoryPressure(memory.pressure)
+                    )
+                } else {
+                    Text("—")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private func storageCard(_ report: DiagnosticReport) -> some View {
+        ControlCenterCard {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "internaldrive")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text("DISK")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                }
+                if case .available(let storage) = report.system.storage, storage.totalBytes > 0 {
+                    let usage = Double(storage.usedBytes) / Double(storage.totalBytes)
+                    Text(percent(usage * 100))
+                        .font(.title3.weight(.semibold).monospacedDigit())
+                    Text("U: \(bytes(storage.usedBytes))  T: \(bytes(storage.totalBytes))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                    ColorBar(fraction: usage, color: .blue)
+                } else {
+                    Text("—")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private func codexCard(_ report: DiagnosticReport) -> some View {
+        ControlCenterCard {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "terminal")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text("CODEX")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                }
+                if case .available(let codex) = report.codex {
+                    let remaining = codex.primaryLimit?.remainingPercent
+                    Text(remaining.map { "\($0)%" } ?? "—")
+                        .font(.title3.weight(.semibold).monospacedDigit())
+                    Text("Remaining")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    if let remaining {
+                        ColorBar(fraction: Double(remaining) / 100, color: MetricColor.remaining(remaining))
+                    }
+                    Text("Today \(codex.tokensToday.map(compactCount) ?? "—") tokens")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 2)
+                } else {
+                    Text("—")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text("Unavailable")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private func networkCard(_ availability: Availability<NetworkReading>) -> some View {
+        ControlCenterCard {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "network")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text("NETWORK")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                }
+                if case .available(let network) = availability {
+                    HStack(spacing: 12) {
+                        Label(network.downloadBytesPerSecond.map(rate) ?? "—", systemImage: "arrow.down")
+                            .foregroundStyle(.blue)
+                        Label(network.uploadBytesPerSecond.map(rate) ?? "—", systemImage: "arrow.up")
+                            .foregroundStyle(.orange)
+                    }
+                    .font(.caption.weight(.semibold).monospacedDigit())
+
+                    Text(network.localIPAddress ?? network.interfaceName ?? "Offline")
+                        .font(.caption2)
+                        .foregroundStyle(.blue.opacity(0.9))
+                        .padding(.top, 4)
+                } else {
+                    Text("Unavailable")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var fanCard: some View {
+        let isOn = model.isFanBoostEnabled
+        return ControlCenterCard {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 6) {
+                    Image(systemName: "fan")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(isOn ? Color.green : Color.secondary)
+                    Text("FAN")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(isOn ? Color.green : Color.secondary)
+                    Spacer(minLength: 4)
+                    Toggle("", isOn: Binding(
+                        get: { model.isFanBoostEnabled },
+                        set: { model.setFanBoostEnabled($0) }
+                    ))
+                    .toggleStyle(FanBoostToggleStyle())
+                    .labelsHidden()
+                    .accessibilityLabel("Fan Boost")
+                }
+
+                FanWindAnimationView(isRunning: isOn)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(model.fanBoost.statusText)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(isOn ? Color.green : Color.primary)
+                    Text(model.fanBoost.detailText)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private var actionRow: some View {
+        HStack(spacing: 18) {
+            ControlCenterAction(
+                title: "Open",
+                systemImage: "macwindow",
+                tint: .blue
+            ) {
+                NotificationCenter.default.post(name: .tildeOpenMainWindow, object: nil)
+            }
+
+            ControlCenterAction(
+                title: "Refresh",
+                systemImage: "arrow.clockwise",
+                tint: .primary,
+                disabled: model.runState == .running
+            ) {
+                model.refresh()
+            }
+
+            ControlCenterAction(
+                title: "Quit",
+                systemImage: "power",
+                tint: .red
+            ) {
+                NSApp.terminate(nil)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 4)
+    }
+
+    private var footerBar: some View {
+        HStack {
+            Text(model.menuBarTitle)
+                .font(.caption.weight(.medium).monospacedDigit())
                 .foregroundStyle(.secondary)
+            Spacer()
+            Image(systemName: "ellipsis")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background {
+            Capsule(style: .continuous)
+                .fill(Color.primary.opacity(colorScheme == .dark ? 0.12 : 0.06))
         }
     }
 
@@ -571,12 +908,74 @@ private struct MenuBarPanel: View {
         return .green
     }
 
+    private func cpuPercentText(_ report: DiagnosticReport) -> String {
+        if case .available(let cpu) = report.system.cpu {
+            return percent(cpu.usagePercent)
+        }
+        return "—"
+    }
+
     private func percent(_ value: Double) -> String {
         "\(value.formatted(.number.precision(.fractionLength(0...1))))%"
     }
 
     private func rate(_ bytesPerSecond: Double) -> String {
         "\((bytesPerSecond * 8 / 1_000_000).formatted(.number.precision(.fractionLength(1)))) Mbps"
+    }
+
+    private func bytes(_ value: UInt64) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(value), countStyle: .memory)
+    }
+
+    private func compactCount(_ value: Int) -> String {
+        value.formatted(.number.notation(.compactName))
+    }
+}
+
+private struct ControlCenterCard<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        content
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .background {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(.regularMaterial)
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
+            }
+    }
+}
+
+private struct ControlCenterAction: View {
+    let title: String
+    let systemImage: String
+    var tint: Color = .primary
+    var disabled = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 6) {
+                ZStack {
+                    Circle()
+                        .fill(Color.primary.opacity(0.08))
+                        .frame(width: 44, height: 44)
+                    Image(systemName: systemImage)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(disabled ? AnyShapeStyle(.tertiary) : AnyShapeStyle(tint))
+                }
+                Text(title)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .accessibilityLabel(title)
     }
 }
 

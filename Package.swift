@@ -8,11 +8,13 @@ let package = Package(
     products: [
         .executable(name: "TildeDiagnostics", targets: ["TildeDiagnosticsApp"]),
         .executable(name: "tilde-probe", targets: ["TildeProbe"]),
+        .executable(name: "tilde-fan", targets: ["TildeFanCLI"]),
         .library(name: "TildeCore", targets: ["TildeCore"]),
     ],
     targets: [
         .target(
             name: "TildeCore",
+            exclude: ["Monitoring/Fan/SMC/NOTICE.md"],
             linkerSettings: [.linkedFramework("IOKit")]
         ),
         .executableTarget(
@@ -21,6 +23,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "TildeProbe",
+            dependencies: ["TildeCore"]
+        ),
+        .executableTarget(
+            name: "TildeFanCLI",
             dependencies: ["TildeCore"]
         ),
         .testTarget(

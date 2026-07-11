@@ -111,11 +111,11 @@ struct ColorBar: View {
                 Capsule()
                     .fill(Color.primary.opacity(0.08))
                 Capsule()
-                    .fill(color)
+                    .fill(color.gradient)
                     .frame(width: geometry.size.width * min(1, max(0, fraction)))
             }
         }
-        .frame(height: 5)
+        .frame(height: 6)
     }
 }
 
