@@ -34,8 +34,17 @@ public actor NetworkProvider: MetricProvider {
 
     public func fetchSnapshot() async throws -> NetworkReading {
         try Task.checkCancellation()
-        let current = try readInterfaces()
-        let now = Date()
+        var current = try readInterfaces()
+        var now = Date()
+
+        if previous == nil {
+            previous = (current.counters, now)
+            try await Task.sleep(for: .milliseconds(250))
+            try Task.checkCancellation()
+            current = try readInterfaces()
+            now = Date()
+        }
+
         let rates = previous.flatMap {
             NetworkRateCalculator.rates(previous: $0.counters, current: current.counters, elapsed: now.timeIntervalSince($0.date))
         }

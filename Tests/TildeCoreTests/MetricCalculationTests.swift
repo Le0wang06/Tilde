@@ -34,10 +34,11 @@ import Testing
     #expect(NetworkRateCalculator.rates(previous: previous, current: current, elapsed: 1) == nil)
 }
 
-@Test func memoryPressureOutputIsParsedWithoutInventingAValue() {
-    #expect(MemoryPressureParser.parse("System-wide memory free percentage: 64%") == .normal)
-    #expect(MemoryPressureParser.parse("Warning: pressure elevated") == .warning)
-    #expect(MemoryPressureParser.parse("unexpected output") == .unavailable)
+@Test func memoryPressureLevelIsParsedWithoutInventingAValue() {
+    #expect(MemoryPressureParser.parseLevel(1) == .normal)
+    #expect(MemoryPressureParser.parseLevel(2) == .warning)
+    #expect(MemoryPressureParser.parseLevel(4) == .critical)
+    #expect(MemoryPressureParser.parseLevel(99) == .unavailable)
 }
 
 @Test func rateLimitRemainingIsClamped() {

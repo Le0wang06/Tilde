@@ -1,13 +1,15 @@
 import Darwin
+import Dispatch
 import Foundation
 
 public enum MemoryPressureParser {
-    public static func parse(_ output: String) -> MemoryPressure {
-        let normalized = output.lowercased()
-        if normalized.contains("critical") { return .critical }
-        if normalized.contains("warn") { return .warning }
-        if normalized.contains("normal") || normalized.contains("free percentage") { return .normal }
-        return .unavailable
+    public static func parseLevel(_ level: Int32) -> MemoryPressure {
+        switch UInt(level) {
+        case DispatchSource.MemoryPressureEvent.normal.rawValue: .normal
+        case DispatchSource.MemoryPressureEvent.warning.rawValue: .warning
+        case DispatchSource.MemoryPressureEvent.critical.rawValue: .critical
+        default: .unavailable
+        }
     }
 }
 
@@ -56,21 +58,11 @@ public struct MemoryProvider: MetricProvider {
     }
 
     private static func readPressure() -> MemoryPressure {
-        let process = Process()
-        let pipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/memory_pressure")
-        process.arguments = ["-Q"]
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-
-        do {
-            try process.run()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else { return .unavailable }
-            return MemoryPressureParser.parse(String(decoding: data, as: UTF8.self))
-        } catch {
+        var level: Int32 = 0
+        var size = MemoryLayout<Int32>.size
+        guard sysctlbyname("kern.memorystatus_vm_pressure_level", &level, &size, nil, 0) == 0 else {
             return .unavailable
         }
+        return MemoryPressureParser.parseLevel(level)
     }
 }
