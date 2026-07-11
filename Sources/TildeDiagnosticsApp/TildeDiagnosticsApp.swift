@@ -28,8 +28,8 @@ struct TildeDiagnosticsApp: App {
 final class DiagnosticViewModel: ObservableObject {
     @Published var report: DiagnosticReport?
     @Published var runState = DiagnosticRunState.idle
-    private let coordinator = MonitoringCoordinator()
-    private var refreshTask: Task<Void, Never>?
+    private let liveMonitoring = LiveMonitoringService()
+    private var subscriptionTask: Task<Void, Never>?
 
     var menuBarSymbol: String {
         if runState == .running { return "ellipsis.circle" }
@@ -41,25 +41,39 @@ final class DiagnosticViewModel: ObservableObject {
         return "waveform.path.ecg"
     }
 
-    func refreshIfNeeded() {
-        guard report == nil, runState != .running else { return }
-        refresh()
+    func startIfNeeded() {
+        guard subscriptionTask == nil else { return }
+        runState.apply(.start)
+        subscriptionTask = Task { [weak self] in
+            guard let self else { return }
+            let reports = await liveMonitoring.reports()
+            for await report in reports {
+                guard !Task.isCancelled else { break }
+                self.report = report
+                self.runState.apply(.finish)
+            }
+        }
     }
 
     func refresh() {
-        refreshTask?.cancel()
+        startIfNeeded()
         runState.apply(.start)
-        refreshTask = Task {
-            let report = await coordinator.runDiagnostics()
-            guard !Task.isCancelled else { return }
-            self.report = report
-            runState.apply(.finish)
+        Task {
+            await liveMonitoring.refreshNow()
+        }
+    }
+
+    func setPresentation(_ id: UUID, isActive: Bool) {
+        startIfNeeded()
+        Task {
+            await liveMonitoring.setPresentation(id, isActive: isActive)
         }
     }
 }
 
 private struct DiagnosticContentView: View {
     @EnvironmentObject private var model: DiagnosticViewModel
+    @State private var presentationID = UUID()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -83,7 +97,8 @@ private struct DiagnosticContentView: View {
                 .padding(20)
             }
         }
-        .task { model.refreshIfNeeded() }
+        .onAppear { model.setPresentation(presentationID, isActive: true) }
+        .onDisappear { model.setPresentation(presentationID, isActive: false) }
     }
 
     private var header: some View {
@@ -93,7 +108,7 @@ private struct DiagnosticContentView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Tilde Phase 0 Diagnostics")
                     .font(.headline)
-                Text("Feasibility checks only")
+                Text(freshnessText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -110,6 +125,11 @@ private struct DiagnosticContentView: View {
             .disabled(model.runState == .running)
         }
         .padding(16)
+    }
+
+    private var freshnessText: String {
+        guard let report = model.report else { return "Starting live monitoring" }
+        return "Live · Updated \(report.system.timestamp.formatted(date: .omitted, time: .standard))"
     }
 
     private func systemSection(_ snapshot: SystemSnapshot) -> some View {
@@ -205,6 +225,7 @@ private struct DiagnosticContentView: View {
 private struct MenuBarPanel: View {
     @EnvironmentObject private var model: DiagnosticViewModel
     @Environment(\.openWindow) private var openWindow
+    @State private var presentationID = UUID()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -269,7 +290,8 @@ private struct MenuBarPanel: View {
             .padding(12)
         }
         .frame(width: 380)
-        .task { model.refreshIfNeeded() }
+        .onAppear { model.setPresentation(presentationID, isActive: true) }
+        .onDisappear { model.setPresentation(presentationID, isActive: false) }
     }
 
     @ViewBuilder
