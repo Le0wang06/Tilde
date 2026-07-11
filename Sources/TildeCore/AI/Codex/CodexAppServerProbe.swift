@@ -97,7 +97,21 @@ public actor CodexAppServerProbe: MetricProvider {
             input.fileHandleForWriting.write(Data([0x0A]))
         }
 
-        let completed = collector.completion.wait(timeout: .now() + 10) == .success
+        let deadline = Date().addingTimeInterval(10)
+        var completed = false
+        while Date() < deadline {
+            if collector.completion.wait(timeout: .now() + .milliseconds(100)) == .success {
+                completed = true
+                break
+            }
+            if Task.isCancelled {
+                try? input.fileHandleForWriting.close()
+                output.fileHandleForReading.readabilityHandler = nil
+                if process.isRunning { process.terminate() }
+                process.waitUntilExit()
+                throw CancellationError()
+            }
+        }
         try input.fileHandleForWriting.close()
         output.fileHandleForReading.readabilityHandler = nil
         if process.isRunning { process.terminate() }
@@ -158,6 +172,8 @@ public actor CodexAppServerProbe: MetricProvider {
         var notes: [String] = []
         if limitsResult == nil { notes.append(responseNote(responses[3], fallback: "Codex rate limits are unavailable for this account")) }
         if usageResult == nil { notes.append(responseNote(responses[4], fallback: "Codex token usage is unavailable for this account or CLI version")) }
+        if usageResult != nil, dailyBuckets == nil { notes.append("Codex returned usage summary data without daily token buckets") }
+        if dailyBuckets != nil, tokensToday == nil { notes.append("Codex returned no token bucket for the current local date") }
         if threadResult == nil { notes.append(responseNote(responses[5], fallback: "Codex thread inventory is unavailable")) }
 
         return CodexDiagnosticSnapshot(
