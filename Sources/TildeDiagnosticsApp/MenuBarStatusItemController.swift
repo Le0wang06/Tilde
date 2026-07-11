@@ -30,12 +30,24 @@ final class MenuBarStatusItemController: NSObject {
             let popover = NSPopover()
             popover.behavior = .transient
             popover.animates = true
-            popover.contentSize = NSSize(width: 388, height: 520)
-            let host = NSHostingController(
-                rootView: MenuBarPanel()
-                    .environmentObject(model)
-            )
-            host.view.wantsLayer = true
+            // Fit content tightly — a fixed tall size left an empty gap under the panel.
+            popover.contentSize = NSSize(width: 384, height: 560)
+            let root = MenuBarPanel()
+                .environmentObject(model)
+                .background(
+                    GeometryReader { proxy in
+                        Color.clear.preference(key: PanelSizeKey.self, value: proxy.size)
+                    }
+                )
+                .onPreferenceChange(PanelSizeKey.self) { size in
+                    guard size.width > 0, size.height > 0 else { return }
+                    self.popover?.contentSize = NSSize(
+                        width: ceil(size.width),
+                        height: ceil(size.height)
+                    )
+                }
+            let host = NSHostingController(rootView: root)
+            host.sizingOptions = [.preferredContentSize]
             popover.contentViewController = host
             self.popover = popover
         }
@@ -73,4 +85,11 @@ final class MenuBarStatusItemController: NSObject {
 extension Notification.Name {
     static let tildeMenuBarTitleDidChange = Notification.Name("tildeMenuBarTitleDidChange")
     static let tildeOpenMainWindow = Notification.Name("tildeOpenMainWindow")
+}
+
+private struct PanelSizeKey: PreferenceKey {
+    static let defaultValue: CGSize = .zero
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
+        value = nextValue()
+    }
 }

@@ -47,6 +47,7 @@ Run calculation and state tests:
 - Codex App Server initialization, account, rate-limit, token-usage, and thread-list probes
 - Native `MenuBarExtra` with health summary, refresh, open-window, and quit actions
 - Menu bar title shows a tilde mark with remaining allowance and tokens used today (e.g. `~ 67% · 12K`) as an AppKit status item at the top of the screen
+- Control Center–style menu panel with CPU/RAM/Disk/Network/Codex cards and Fan Boost (animated fan + wind; macOS still owns actual RPM)
 
 ## Live updates
 

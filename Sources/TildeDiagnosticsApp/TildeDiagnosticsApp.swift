@@ -45,7 +45,9 @@ final class DiagnosticViewModel: ObservableObject {
     @Published private(set) var history: [LiveMetricSample] = []
     /// Compact Codex remaining % shown in the macOS menu bar title.
     @Published private(set) var menuBarTitle: String = "~ …"
+    @Published private(set) var fanBoost: FanBoostController.Snapshot = .idle
     private let liveMonitoring = LiveMonitoringService()
+    private let fanBoostController = FanBoostController()
     private var historyBuffer = LiveMetricHistory()
     private var subscriptionTask: Task<Void, Never>?
     private let menuBarPresentationID = UUID()
@@ -59,6 +61,8 @@ final class DiagnosticViewModel: ObservableObject {
         }
         return "waveform.path.ecg"
     }
+
+    var isFanBoostEnabled: Bool { fanBoost.isEnabled }
 
     func startIfNeeded() {
         guard subscriptionTask == nil else { return }
@@ -89,6 +93,12 @@ final class DiagnosticViewModel: ObservableObject {
             object: nil,
             userInfo: ["title": menuBarTitle]
         )
+        if fanBoost.isEnabled {
+            Task {
+                let snapshot = await fanBoostController.currentSnapshot(thermalState: report.system.thermalState)
+                await MainActor.run { self.fanBoost = snapshot }
+            }
+        }
         runState.apply(.finish)
     }
 
@@ -105,6 +115,14 @@ final class DiagnosticViewModel: ObservableObject {
             tokens = "—"
         }
         return "~ \(remaining) · \(tokens)"
+    }
+
+    func setFanBoostEnabled(_ enabled: Bool) {
+        let thermal = report?.system.thermalState ?? .unavailable
+        Task {
+            let snapshot = await fanBoostController.setEnabled(enabled, thermalState: thermal)
+            await MainActor.run { self.fanBoost = snapshot }
+        }
     }
 
     func refresh() {
@@ -462,7 +480,7 @@ struct MenuBarPanel: View {
     private let panelWidth: CGFloat = 360
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 10) {
             header
 
             if let report = model.report {
@@ -472,11 +490,12 @@ struct MenuBarPanel: View {
             } else {
                 ProgressView("Collecting…")
                     .controlSize(.small)
-                    .frame(maxWidth: .infinity, minHeight: 180)
+                    .frame(maxWidth: .infinity, minHeight: 120)
             }
         }
-        .padding(14)
+        .padding(12)
         .frame(width: panelWidth)
+        .fixedSize(horizontal: true, vertical: true)
         .background {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .fill(.ultraThinMaterial)
@@ -514,22 +533,30 @@ struct MenuBarPanel: View {
 
     @ViewBuilder
     private func metricGrid(_ report: DiagnosticReport) -> some View {
-        VStack(spacing: 10) {
-            HStack(alignment: .top, spacing: 10) {
+        Grid(horizontalSpacing: 10, verticalSpacing: 10) {
+            GridRow {
                 cpuCard(report)
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity, minHeight: 148, maxHeight: .infinity, alignment: .topLeading)
                 VStack(spacing: 10) {
                     memoryCard(report)
+                        .frame(maxWidth: .infinity, minHeight: 69, alignment: .topLeading)
                     storageCard(report)
+                        .frame(maxWidth: .infinity, minHeight: 69, alignment: .topLeading)
                 }
-                .frame(maxWidth: .infinity)
+                .frame(maxWidth: .infinity, minHeight: 148)
             }
 
-            HStack(alignment: .top, spacing: 10) {
-                codexCard(report)
-                    .frame(maxWidth: .infinity)
+            GridRow {
+                fanCard
+                    .frame(maxWidth: .infinity, minHeight: 118, maxHeight: .infinity, alignment: .topLeading)
                 networkCard(report.system.network)
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity, minHeight: 118, maxHeight: .infinity, alignment: .topLeading)
+            }
+
+            GridRow {
+                codexCard(report)
+                    .gridCellColumns(2)
+                    .frame(maxWidth: .infinity, minHeight: 96, alignment: .topLeading)
             }
         }
     }
@@ -689,6 +716,43 @@ struct MenuBarPanel: View {
                     Text("Unavailable")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var fanCard: some View {
+        ControlCenterCard {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 6) {
+                    Image(systemName: "fan")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text("FAN")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 4)
+                    Toggle("", isOn: Binding(
+                        get: { model.isFanBoostEnabled },
+                        set: { model.setFanBoostEnabled($0) }
+                    ))
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+                    .controlSize(.mini)
+                    .tint(.blue)
+                    .accessibilityLabel("Fan Boost")
+                }
+
+                FanWindAnimationView(isRunning: model.isFanBoostEnabled)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(model.fanBoost.statusText)
+                        .font(.caption.weight(.semibold))
+                    Text(model.fanBoost.detailText)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
