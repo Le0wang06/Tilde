@@ -57,7 +57,7 @@ The test script uses Apple's Swift Testing framework because this machine does n
 
 - CPU temperature, GPU utilization, and fan RPM remain unavailable by design. A hardware feasibility spike must evaluate a separately isolated sensor adapter and device support before these can ship.
 - Exact active-agent state and streamed turn-event mapping belong to Phase 3. Phase 0 only verifies that the App Server can initialize and expose account/usage/thread data.
-- No persistence, history, alerts, menu bar item, adaptive scheduler, notifications, process management, or polished navigation has been started.
+- A minimal `MenuBarExtra` was added after Phase 0 for local access. Full menu sections, continuous adaptive sampling, persistence, history, alerts, notifications, process management, and polished navigation remain deferred.
 - Full Xcode is required before XCTest, XCUITest, app bundles, signing, notarization, and UI automation can be verified.
 
 ## Codex protocol basis

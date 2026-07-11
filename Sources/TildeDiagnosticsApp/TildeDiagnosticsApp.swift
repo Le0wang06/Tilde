@@ -1,23 +1,50 @@
+import AppKit
 import SwiftUI
 import TildeCore
 
 @main
 struct TildeDiagnosticsApp: App {
+    @StateObject private var model = DiagnosticViewModel()
+
     var body: some Scene {
-        WindowGroup("Tilde Diagnostics") {
+        WindowGroup("Tilde Diagnostics", id: "diagnostics") {
             DiagnosticContentView()
+                .environmentObject(model)
                 .frame(minWidth: 680, minHeight: 520)
         }
         .defaultSize(width: 760, height: 720)
+
+        MenuBarExtra {
+            MenuBarPanel()
+                .environmentObject(model)
+        } label: {
+            Label("Tilde", systemImage: model.menuBarSymbol)
+        }
+        .menuBarExtraStyle(.window)
     }
 }
 
 @MainActor
-private final class DiagnosticViewModel: ObservableObject {
+final class DiagnosticViewModel: ObservableObject {
     @Published var report: DiagnosticReport?
     @Published var runState = DiagnosticRunState.idle
     private let coordinator = MonitoringCoordinator()
     private var refreshTask: Task<Void, Never>?
+
+    var menuBarSymbol: String {
+        if runState == .running { return "ellipsis.circle" }
+        guard let report else { return "waveform.path.ecg" }
+        if report.system.thermalState == .critical { return "exclamationmark.triangle.fill" }
+        if case .available(let memory) = report.system.memory, memory.pressure == .critical {
+            return "exclamationmark.triangle.fill"
+        }
+        return "waveform.path.ecg"
+    }
+
+    func refreshIfNeeded() {
+        guard report == nil, runState != .running else { return }
+        refresh()
+    }
 
     func refresh() {
         refreshTask?.cancel()
@@ -32,7 +59,7 @@ private final class DiagnosticViewModel: ObservableObject {
 }
 
 private struct DiagnosticContentView: View {
-    @StateObject private var model = DiagnosticViewModel()
+    @EnvironmentObject private var model: DiagnosticViewModel
 
     var body: some View {
         VStack(spacing: 0) {
@@ -56,7 +83,7 @@ private struct DiagnosticContentView: View {
                 .padding(20)
             }
         }
-        .task { model.refresh() }
+        .task { model.refreshIfNeeded() }
     }
 
     private var header: some View {
@@ -172,6 +199,138 @@ private struct DiagnosticContentView: View {
 
     private func formatCount(_ value: Int) -> String {
         value.formatted(.number.notation(.compactName))
+    }
+}
+
+private struct MenuBarPanel: View {
+    @EnvironmentObject private var model: DiagnosticViewModel
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Image(systemName: model.menuBarSymbol)
+                    .font(.title2)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Tilde")
+                        .font(.headline)
+                    Text(statusText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if model.runState == .running {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+            .padding(16)
+
+            Divider()
+
+            VStack(spacing: 0) {
+                if let report = model.report {
+                    panelRows(report)
+                } else {
+                    Text("Collecting diagnostics...")
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, minHeight: 120)
+                }
+            }
+            .padding(.horizontal, 16)
+
+            Divider()
+
+            HStack(spacing: 8) {
+                Button {
+                    openWindow(id: "diagnostics")
+                    NSApp.activate(ignoringOtherApps: true)
+                } label: {
+                    Label("Open Tilde", systemImage: "macwindow")
+                }
+
+                Spacer()
+
+                Button {
+                    model.refresh()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .help("Run Diagnostics")
+                .disabled(model.runState == .running)
+
+                Button {
+                    NSApp.terminate(nil)
+                } label: {
+                    Image(systemName: "power")
+                }
+                .help("Quit Tilde")
+            }
+            .padding(12)
+        }
+        .frame(width: 380)
+        .task { model.refreshIfNeeded() }
+    }
+
+    @ViewBuilder
+    private func panelRows(_ report: DiagnosticReport) -> some View {
+        PanelMetricRow(label: "CPU", value: cpuValue(report.system.cpu))
+        PanelMetricRow(label: "Memory", value: memoryValue(report.system.memory))
+        PanelMetricRow(label: "Memory Pressure", value: pressureValue(report.system.memory))
+        PanelMetricRow(label: "Thermal State", value: report.system.thermalState.rawValue.capitalized)
+        PanelMetricRow(label: "Codex Remaining", value: codexRemaining(report.codex))
+        PanelMetricRow(label: "Codex Threads", value: codexThreads(report.codex))
+    }
+
+    private var statusText: String {
+        if model.runState == .running { return "Monitoring" }
+        guard let report = model.report else { return "Starting" }
+        if report.system.thermalState == .critical { return "Thermal Pressure" }
+        if case .available(let memory) = report.system.memory {
+            if memory.pressure == .critical { return "High Memory Pressure" }
+            if memory.pressure == .warning { return "Memory Pressure Elevated" }
+        }
+        return "All Systems Normal"
+    }
+
+    private func cpuValue(_ availability: Availability<CPUReading>) -> String {
+        guard case .available(let reading) = availability else { return "Unavailable" }
+        return "\(reading.usagePercent.formatted(.number.precision(.fractionLength(1))))%"
+    }
+
+    private func memoryValue(_ availability: Availability<MemoryReading>) -> String {
+        guard case .available(let reading) = availability else { return "Unavailable" }
+        return ByteCountFormatter.string(fromByteCount: Int64(reading.usedBytes), countStyle: .memory)
+    }
+
+    private func pressureValue(_ availability: Availability<MemoryReading>) -> String {
+        guard case .available(let reading) = availability else { return "Unavailable" }
+        return reading.pressure.rawValue.capitalized
+    }
+
+    private func codexRemaining(_ availability: Availability<CodexDiagnosticSnapshot>) -> String {
+        guard case .available(let codex) = availability, let limit = codex.primaryLimit else { return "Unavailable" }
+        return "\(limit.remainingPercent)%"
+    }
+
+    private func codexThreads(_ availability: Availability<CodexDiagnosticSnapshot>) -> String {
+        guard case .available(let codex) = availability, let count = codex.threadCount else { return "Unavailable" }
+        return String(count)
+    }
+}
+
+private struct PanelMetricRow: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack {
+            Text(label)
+            Spacer()
+            Text(value)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 7)
     }
 }
 

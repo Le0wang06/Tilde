@@ -2,7 +2,7 @@
 
 Tilde is a native, local-first macOS command center for system health and AI coding agents.
 
-This repository currently contains **Phase 0 only**: an intentionally plain SwiftUI diagnostic application used to verify macOS metrics and Codex App Server integration before product UI work begins.
+This repository contains the completed **Phase 0** diagnostic application plus a minimal native menu-bar shell requested for local use. The menu-bar panel shares diagnostic state with the main window; broader Phase 1 application work has not started.
 
 ## Requirements
 
@@ -45,6 +45,7 @@ Run calculation and state tests:
 - Explicit unavailable values for CPU temperature, GPU utilization, and fan speed
 - Codex executable/version detection
 - Codex App Server initialization, account, rate-limit, token-usage, and thread-list probes
+- Native `MenuBarExtra` with health summary, refresh, open-window, and quit actions
 
 No prompts, source code, terminal output, auth tokens, or account email are stored or printed.
 
