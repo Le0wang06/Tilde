@@ -5,9 +5,10 @@ import Foundation
 /// Reads SMC fan RPM in-process. Writes require root on Apple Silicon, so
 /// when the toggle turns on we:
 /// 1. try an in-process SMC write
-/// 2. if permission is denied, re-run `tilde-fan boost` with an admin prompt
-/// 3. keep re-applying the target while boost stays enabled (thermalmonitord
-///    otherwise reclaims control)
+/// 2. if permission is denied, start `tilde-fan hold` once with an admin prompt
+///    (it re-applies the target every few seconds so thermalmonitord cannot reclaim)
+/// 3. never downgrade a working boost to "failed" just because an unprivileged
+///    keep-alive rewrite is denied
 ///
 /// SMC client code is adapted from [macfanctl](https://github.com/2dubu/macfanctl) (MIT).
 public actor FanBoostController {
@@ -38,12 +39,29 @@ public actor FanBoostController {
     private var mode: Mode = .off
     private var lastError: String?
     private var keepAliveTask: Task<Void, Never>?
+    private var privilegedHoldProcess: Process?
     private let boostFraction = 0.85
 
     public init() {}
 
     public func currentSnapshot(thermalState: TildeThermalState = .unavailable) -> Snapshot {
-        let rpm = (try? readPrimaryRPM()) ?? nil
+        let fans = (try? SMC().readFans()) ?? []
+        let rpm = fans.map(\.actualRPM).max()
+        let target = fans.map(\.targetRPM).max()
+        let looksBoosted = fans.contains(where: isBoosted)
+
+        // Hold process still running means boost is actively maintained.
+        if enabled, privilegedHoldProcess?.isRunning == true, mode != .hardwareBoost {
+            mode = .hardwareBoost
+            lastError = nil
+        }
+
+        // Heal false "failed" when fans are clearly boosted.
+        if enabled, looksBoosted, mode == .failed || mode == .needsPrivilege {
+            mode = .hardwareBoost
+            lastError = nil
+        }
+
         if !enabled {
             return Snapshot(
                 isEnabled: false,
@@ -56,11 +74,19 @@ public actor FanBoostController {
 
         switch mode {
         case .hardwareBoost:
+            let detail: String
+            if let rpm, rpm > 0 {
+                detail = "\(rpm) RPM · system fans spinning"
+            } else if let target, target > 0 {
+                detail = "Target \(target) RPM · boost held"
+            } else {
+                detail = "Fans boosted"
+            }
             return Snapshot(
                 isEnabled: true,
                 mode: .hardwareBoost,
                 statusText: "Boost On",
-                detailText: rpm.map { "\($0) RPM · system fans spinning" } ?? "Fans boosted",
+                detailText: detail,
                 rpm: rpm
             )
         case .needsPrivilege:
@@ -92,6 +118,7 @@ public actor FanBoostController {
         } else {
             keepAliveTask?.cancel()
             keepAliveTask = nil
+            stopPrivilegedHold()
             await restoreAuto(privilegedFallback: true)
             enabled = false
             mode = .off
@@ -106,6 +133,8 @@ public actor FanBoostController {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(8))
                 guard let self, await self.enabled else { break }
+                // If the privileged hold is already re-applying as root, leave it alone.
+                if await self.privilegedHoldProcess?.isRunning == true { continue }
                 await self.applyBoost(privilegedFallback: false)
             }
         }
@@ -118,28 +147,36 @@ public actor FanBoostController {
             lastError = nil
             return
         } catch SMCError.permissionDenied {
+            await handleWriteFailure(error: SMCError.permissionDenied, privilegedFallback: privilegedFallback)
+        } catch {
+            await handleWriteFailure(error: error, privilegedFallback: privilegedFallback)
+        }
+    }
+
+    private func handleWriteFailure(error: Error, privilegedFallback: Bool) async {
+        // Unprivileged keep-alive cannot rewrite SMC keys. If boost already
+        // succeeded (or a privileged hold is running), keep showing success.
+        if !privilegedFallback {
+            if privilegedHoldProcess?.isRunning == true || mode == .hardwareBoost {
+                return
+            }
             mode = .needsPrivilege
-            guard privilegedFallback else { return }
+            lastError = error.localizedDescription
+            return
+        }
+
+        mode = .needsPrivilege
+        do {
+            try await startPrivilegedHold()
+            mode = .hardwareBoost
+            lastError = nil
+        } catch {
+            // One-shot boost as a last resort (still requires the same prompt).
             do {
-                try await runPrivilegedFanCLI(argument: "boost")
+                try await runPrivilegedFanCLI(argument: "boost", waitUntilExit: true)
                 mode = .hardwareBoost
                 lastError = nil
             } catch {
-                mode = .failed
-                lastError = error.localizedDescription
-            }
-        } catch {
-            if privilegedFallback {
-                do {
-                    try await runPrivilegedFanCLI(argument: "boost")
-                    mode = .hardwareBoost
-                    lastError = nil
-                    return
-                } catch {
-                    mode = .failed
-                    lastError = error.localizedDescription
-                }
-            } else {
                 mode = .failed
                 lastError = error.localizedDescription
             }
@@ -150,10 +187,10 @@ public actor FanBoostController {
         do {
             try restoreInProcess()
         } catch SMCError.permissionDenied where privilegedFallback {
-            try? await runPrivilegedFanCLI(argument: "auto")
+            try? await runPrivilegedFanCLI(argument: "auto", waitUntilExit: true)
         } catch {
             if privilegedFallback {
-                try? await runPrivilegedFanCLI(argument: "auto")
+                try? await runPrivilegedFanCLI(argument: "auto", waitUntilExit: true)
             }
         }
     }
@@ -179,13 +216,56 @@ public actor FanBoostController {
         try? smc.resetFanTestUnlock()
     }
 
-    private func readPrimaryRPM() throws -> Int? {
-        let smc = try SMC()
-        let fans = try smc.readFans()
-        return fans.first?.actualRPM
+    private func startPrivilegedHold() async throws {
+        if privilegedHoldProcess?.isRunning == true { return }
+
+        stopPrivilegedHold()
+        let helper = try resolveFanCLIURL()
+        let escaped = helper.path.replacingOccurrences(of: "'", with: "'\\''")
+        // One admin prompt; `hold` keeps re-applying boost until we terminate it.
+        let script = "do shell script \"'\(escaped)' hold\" with administrator privileges"
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", script]
+        let stderr = Pipe()
+        process.standardError = stderr
+        try process.run()
+        privilegedHoldProcess = process
+
+        // Password dialog can take a while. Fail only if the process exits.
+        // Succeed early once fan targets look boosted.
+        for _ in 0..<300 { // up to ~120s
+            try await Task.sleep(for: .milliseconds(400))
+            if !process.isRunning {
+                let message = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                privilegedHoldProcess = nil
+                throw FanCLIError.privilegedFailed(message ?? "Admin authorization failed")
+            }
+            if let fans = try? SMC().readFans(), fans.contains(where: isBoosted(_:)) {
+                return
+            }
+        }
+
+        // Still alive after the wait window — treat hold as active.
+        if process.isRunning { return }
+        privilegedHoldProcess = nil
+        throw FanCLIError.privilegedFailed("Admin authorization failed")
     }
 
-    private func runPrivilegedFanCLI(argument: String) async throws {
+    private func isBoosted(_ fan: FanInfo) -> Bool {
+        let floor = max(fan.minRPM + 200, Int(Double(fan.maxRPM) * 0.55))
+        return fan.targetRPM >= floor || fan.actualRPM >= floor
+    }
+
+    private func stopPrivilegedHold() {
+        guard let process = privilegedHoldProcess else { return }
+        process.terminate()
+        process.waitUntilExit()
+        privilegedHoldProcess = nil
+    }
+
+    private func runPrivilegedFanCLI(argument: String, waitUntilExit: Bool) async throws {
         let helper = try resolveFanCLIURL()
         let escaped = helper.path.replacingOccurrences(of: "'", with: "'\\''")
         let script = "do shell script \"'\(escaped)' \(argument)\" with administrator privileges"
@@ -195,11 +275,13 @@ public actor FanBoostController {
         let stderr = Pipe()
         process.standardError = stderr
         try process.run()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            let message = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            throw FanCLIError.privilegedFailed(message ?? "Admin authorization failed")
+        if waitUntilExit {
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else {
+                let message = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                throw FanCLIError.privilegedFailed(message ?? "Admin authorization failed")
+            }
         }
     }
 
@@ -208,13 +290,6 @@ public actor FanBoostController {
         let sibling = executable.deletingLastPathComponent().appendingPathComponent("tilde-fan")
         if FileManager.default.isExecutableFile(atPath: sibling.path) {
             return sibling
-        }
-        // swift run puts products in .build/.../debug/
-        let buildSibling = executable
-            .deletingLastPathComponent()
-            .appendingPathComponent("tilde-fan")
-        if FileManager.default.isExecutableFile(atPath: buildSibling.path) {
-            return buildSibling
         }
         throw FanCLIError.helperMissing
     }

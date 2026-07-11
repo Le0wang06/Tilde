@@ -76,8 +76,9 @@ final class MenuBarStatusItemController: NSObject {
             popover.performClose(sender)
         } else {
             model?.startIfNeeded()
+            // Show only the status-item panel — do not activate the app or
+            // bring any main diagnostics window forward.
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            NSApp.activate(ignoringOtherApps: true)
         }
     }
 }

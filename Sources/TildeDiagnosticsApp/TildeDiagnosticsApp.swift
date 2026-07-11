@@ -12,6 +12,7 @@ struct TildeDiagnosticsApp: App {
         _model = StateObject(wrappedValue: model)
         Task { @MainActor in
             model.startIfNeeded()
+            TildeAppDelegate.shared?.model = model
             MenuBarStatusItemController.shared.install(model: model)
         }
     }
@@ -21,20 +22,106 @@ struct TildeDiagnosticsApp: App {
             DiagnosticContentView()
                 .environmentObject(model)
                 .frame(minWidth: 760, minHeight: 560)
-                .onReceive(NotificationCenter.default.publisher(for: .tildeOpenMainWindow)) { _ in
-                    NSApp.activate(ignoringOtherApps: true)
-                }
         }
         .defaultSize(width: 920, height: 780)
         // Menu bar item is an AppKit NSStatusItem so the AI % text is always visible.
+        // Main window stays closed until Open is pressed in the status-item panel.
     }
 }
 
 @MainActor
 final class TildeAppDelegate: NSObject, NSApplicationDelegate {
+    static private(set) weak var shared: TildeAppDelegate?
+
+    var model: DiagnosticViewModel?
+    private var hostedMainWindow: NSWindow?
+    private var openMainWindowObserver: NSObjectProtocol?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Self.shared = self
+        // Stay in the menu bar only — don't steal focus or pop the main window.
+        NSApp.setActivationPolicy(.accessory)
+        DispatchQueue.main.async {
+            for window in NSApp.windows where window.isVisible {
+                window.orderOut(nil)
+            }
+        }
+
+        openMainWindowObserver = NotificationCenter.default.addObserver(
+            forName: .tildeOpenMainWindow,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.presentMainWindow()
+            }
+        }
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        // Dock isn't shown in accessory mode; ignore reopen.
+        false
+    }
+
+    /// Show the full diagnostics window; switches to regular activation so it can come forward.
+    func presentMainWindow() {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+
+        if let hostedMainWindow, hostedMainWindow.isVisible {
+            hostedMainWindow.makeKeyAndOrderFront(nil)
+            return
+        }
+
+        let existing = NSApp.windows.filter {
+            $0.canBecomeMain && !($0.className.contains("NSStatusBar"))
+        }
+        if let window = existing.first {
+            window.makeKeyAndOrderFront(nil)
+            return
+        }
+
+        guard let model else { return }
+        let host = NSHostingController(
+            rootView: DiagnosticContentView()
+                .environmentObject(model)
+                .frame(minWidth: 760, minHeight: 560)
+        )
+        let window = NSWindow(contentViewController: host)
+        window.title = "Tilde"
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.setContentSize(NSSize(width: 920, height: 780))
+        window.center()
+        window.isReleasedWhenClosed = false
+        window.delegate = self
+        window.makeKeyAndOrderFront(nil)
+        hostedMainWindow = window
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        // If the user closed every window, return to menu-bar-only mode.
+        let hasMain = NSApp.windows.contains {
+            $0.isVisible && $0.canBecomeMain && !($0.className.contains("NSStatusBar"))
+        }
+        if !hasMain, NSApp.activationPolicy() == .regular {
+            NSApp.setActivationPolicy(.accessory)
+        }
+    }
+}
+
+extension TildeAppDelegate: NSWindowDelegate {
+    func windowWillClose(_ notification: Notification) {
+        if notification.object as? NSWindow === hostedMainWindow {
+            hostedMainWindow = nil
+        }
+        DispatchQueue.main.async {
+            let hasMain = NSApp.windows.contains {
+                $0.isVisible && $0.canBecomeMain && !($0.className.contains("NSStatusBar"))
+            }
+            if !hasMain {
+                NSApp.setActivationPolicy(.accessory)
+            }
+        }
     }
 }
 
@@ -731,10 +818,8 @@ struct MenuBarPanel: View {
                         get: { model.isFanBoostEnabled },
                         set: { model.setFanBoostEnabled($0) }
                     ))
-                    .toggleStyle(.switch)
+                    .toggleStyle(FanBoostToggleStyle())
                     .labelsHidden()
-                    .controlSize(.mini)
-                    .tint(.green)
                     .accessibilityLabel("Fan Boost")
                 }
 
@@ -762,10 +847,6 @@ struct MenuBarPanel: View {
                 tint: .blue
             ) {
                 NotificationCenter.default.post(name: .tildeOpenMainWindow, object: nil)
-                NSApp.activate(ignoringOtherApps: true)
-                for window in NSApp.windows where window.isVisible || window.title.contains("Tilde") {
-                    window.makeKeyAndOrderFront(nil)
-                }
             }
 
             ControlCenterAction(
