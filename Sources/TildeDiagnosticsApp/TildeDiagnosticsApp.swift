@@ -4,15 +4,16 @@ import TildeCore
 
 @main
 struct TildeDiagnosticsApp: App {
+    @NSApplicationDelegateAdaptor(TildeAppDelegate.self) private var appDelegate
     @StateObject private var model = DiagnosticViewModel()
 
     var body: some Scene {
-        WindowGroup("Tilde Diagnostics", id: "diagnostics") {
+        WindowGroup("Tilde", id: "diagnostics") {
             DiagnosticContentView()
                 .environmentObject(model)
-                .frame(minWidth: 680, minHeight: 520)
+                .frame(minWidth: 760, minHeight: 560)
         }
-        .defaultSize(width: 760, height: 720)
+        .defaultSize(width: 920, height: 780)
 
         MenuBarExtra {
             MenuBarPanel()
@@ -21,6 +22,14 @@ struct TildeDiagnosticsApp: App {
             Label("Tilde", systemImage: model.menuBarSymbol)
         }
         .menuBarExtraStyle(.window)
+    }
+}
+
+@MainActor
+final class TildeAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
     }
 }
 
@@ -102,23 +111,28 @@ private struct DiagnosticContentView: View {
                     }
                 }
                 .padding(24)
+                .frame(maxWidth: 980)
+                .frame(maxWidth: .infinity)
             }
         }
+        .background(Color(nsColor: .windowBackgroundColor))
         .onAppear { model.setPresentation(presentationID, isActive: true) }
         .onDisappear { model.setPresentation(presentationID, isActive: false) }
     }
 
     private var header: some View {
-        HStack(spacing: 12) {
-            Circle()
-                .fill(statusColor)
-                .frame(width: 10, height: 10)
+        HStack(alignment: .center, spacing: 14) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Tilde")
-                    .font(.title2.weight(.semibold))
-                Text(freshnessText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text("Overview")
+                    .font(.title.weight(.semibold))
+                HStack(spacing: 7) {
+                    Circle()
+                        .fill(statusColor)
+                        .frame(width: 7, height: 7)
+                    Text(freshnessText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             Spacer()
             if model.runState == .running {
@@ -133,7 +147,10 @@ private struct DiagnosticContentView: View {
             .help("Refresh All Metrics")
             .disabled(model.runState == .running)
         }
-        .padding(16)
+        .padding(.horizontal, 24)
+        .padding(.vertical, 18)
+        .frame(maxWidth: 1_028)
+        .frame(maxWidth: .infinity)
     }
 
     private var freshnessText: String {
@@ -151,36 +168,36 @@ private struct DiagnosticContentView: View {
     }
 
     private func overview(_ report: DiagnosticReport) -> some View {
-        HStack(spacing: 18) {
+        HStack(spacing: 10) {
             SummaryMetric(
                 title: "CPU",
                 value: cpuPercent(report.system.cpu).map(percent) ?? "--",
                 detail: "Live utilization",
-                color: cpuPercent(report.system.cpu).map(MetricColor.utilization) ?? .secondary
+                color: cpuPercent(report.system.cpu).map(MetricColor.utilization) ?? .secondary,
+                fraction: cpuPercent(report.system.cpu).map { $0 / 100 }
             )
-            Divider().frame(height: 54)
             SummaryMetric(
                 title: "Memory",
                 value: memoryPercent(report.system.memory).map(percent) ?? "--",
                 detail: pressureValue(report.system.memory),
-                color: memoryColor(report.system.memory)
+                color: memoryColor(report.system.memory),
+                fraction: memoryPercent(report.system.memory).map { $0 / 100 }
             )
-            Divider().frame(height: 54)
             SummaryMetric(
                 title: "Storage",
                 value: storagePercent(report.system.storage).map(percent) ?? "--",
                 detail: storageValue(report.system.storage),
-                color: storagePercent(report.system.storage).map(MetricColor.utilization) ?? .secondary
+                color: storagePercent(report.system.storage).map(MetricColor.utilization) ?? .secondary,
+                fraction: storagePercent(report.system.storage).map { $0 / 100 }
             )
-            Divider().frame(height: 54)
             SummaryMetric(
                 title: "Codex",
                 value: codexRemaining(report.codex).map { "\($0)%" } ?? "--",
                 detail: "Allowance remaining",
-                color: codexRemaining(report.codex).map(MetricColor.remaining) ?? .secondary
+                color: codexRemaining(report.codex).map(MetricColor.remaining) ?? .secondary,
+                fraction: codexRemaining(report.codex).map { Double($0) / 100 }
             )
         }
-        .padding(.vertical, 4)
     }
 
     private var liveActivity: some View {
@@ -202,107 +219,123 @@ private struct DiagnosticContentView: View {
 
     private func resourceSection(_ snapshot: SystemSnapshot) -> some View {
         MonitorSection(title: "Resources", symbol: "gauge.with.dots.needle.50percent") {
-            if let cpu = cpuPercent(snapshot.cpu) {
-                MetricBar(label: "CPU", value: percent(cpu), fraction: cpu / 100, color: MetricColor.utilization(cpu))
-            } else {
-                MetricBar(label: "CPU", value: "Unavailable", fraction: nil, color: .secondary)
-            }
-            if case .available(let memory) = snapshot.memory {
-                let usage = memory.totalBytes > 0 ? Double(memory.usedBytes) / Double(memory.totalBytes) * 100 : 0
-                MetricBar(
-                    label: "Memory",
-                    value: "\(bytes(memory.usedBytes)) / \(bytes(memory.totalBytes))",
-                    fraction: usage / 100,
-                    color: memory.pressure == .normal ? MetricColor.utilization(usage) : MetricColor.memoryPressure(memory.pressure),
-                    detail: memory.pressure.rawValue.capitalized
-                )
-                MetricRow(label: "Swap", value: bytes(memory.swapUsedBytes))
-            } else {
-                MetricBar(label: "Memory", value: "Unavailable", fraction: nil, color: .secondary)
-            }
-            if case .available(let storage) = snapshot.storage, storage.totalBytes > 0 {
-                let usage = Double(storage.usedBytes) / Double(storage.totalBytes) * 100
-                MetricBar(
-                    label: "Storage",
-                    value: "\(bytes(storage.usedBytes)) / \(bytes(storage.totalBytes))",
-                    fraction: usage / 100,
-                    color: MetricColor.utilization(usage)
-                )
-            } else {
-                MetricBar(label: "Storage", value: "Unavailable", fraction: nil, color: .secondary)
+            ModernSurface {
+                VStack(alignment: .leading, spacing: 12) {
+                    if let cpu = cpuPercent(snapshot.cpu) {
+                        MetricBar(label: "CPU", value: percent(cpu), fraction: cpu / 100, color: MetricColor.utilization(cpu))
+                    } else {
+                        MetricBar(label: "CPU", value: "Unavailable", fraction: nil, color: .secondary)
+                    }
+                    if case .available(let memory) = snapshot.memory {
+                        let usage = memory.totalBytes > 0 ? Double(memory.usedBytes) / Double(memory.totalBytes) * 100 : 0
+                        MetricBar(
+                            label: "Memory",
+                            value: "\(bytes(memory.usedBytes)) / \(bytes(memory.totalBytes))",
+                            fraction: usage / 100,
+                            color: memoryBarColor(usage: usage, pressure: memory.pressure),
+                            detail: memory.pressure.rawValue.capitalized
+                        )
+                        MetricRow(label: "Swap", value: bytes(memory.swapUsedBytes))
+                    } else {
+                        MetricBar(label: "Memory", value: "Unavailable", fraction: nil, color: .secondary)
+                    }
+                    if case .available(let storage) = snapshot.storage, storage.totalBytes > 0 {
+                        let usage = Double(storage.usedBytes) / Double(storage.totalBytes) * 100
+                        MetricBar(
+                            label: "Storage",
+                            value: "\(bytes(storage.usedBytes)) / \(bytes(storage.totalBytes))",
+                            fraction: usage / 100,
+                            color: MetricColor.utilization(usage)
+                        )
+                    } else {
+                        MetricBar(label: "Storage", value: "Unavailable", fraction: nil, color: .secondary)
+                    }
+                }
             }
         }
     }
 
     private func networkAndPowerSection(_ snapshot: SystemSnapshot) -> some View {
         MonitorSection(title: "Network & Power", symbol: "network") {
-            if case .available(let network) = snapshot.network {
-                MetricRow(label: "Download", value: network.downloadBytesPerSecond.map(rate) ?? "Collecting baseline")
-                MetricRow(label: "Upload", value: network.uploadBytesPerSecond.map(rate) ?? "Collecting baseline")
-                MetricRow(label: "Connection", value: network.interfaceName ?? "Unavailable")
-                MetricRow(label: "Local IP", value: network.localIPAddress ?? "Unavailable")
-            } else {
-                MetricRow(label: "Network", value: "Unavailable", isUnavailable: true)
+            ModernSurface {
+                VStack(alignment: .leading, spacing: 8) {
+                    if case .available(let network) = snapshot.network {
+                        MetricRow(label: "Download", value: network.downloadBytesPerSecond.map(rate) ?? "Collecting baseline")
+                        MetricRow(label: "Upload", value: network.uploadBytesPerSecond.map(rate) ?? "Collecting baseline")
+                        MetricRow(label: "Connection", value: network.interfaceName ?? "Unavailable")
+                        MetricRow(label: "Local IP", value: network.localIPAddress ?? "Unavailable")
+                    } else {
+                        MetricRow(label: "Network", value: "Unavailable", isUnavailable: true)
+                    }
+                    if case .available(let battery) = snapshot.battery {
+                        MetricBar(
+                            label: "Battery",
+                            value: battery.percent.map(percent) ?? "Unavailable",
+                            fraction: battery.percent.map { $0 / 100 },
+                            color: battery.percent.map { $0 <= 15 ? .red : ($0 <= 30 ? .orange : .green) } ?? .secondary,
+                            detail: battery.isOnACPower ? "Adapter" : "Battery"
+                        )
+                    } else {
+                        MetricRow(label: "Battery", value: "Unavailable", isUnavailable: true)
+                    }
+                    MetricRow(label: "Thermal State", value: snapshot.thermalState.rawValue.capitalized)
+                }
             }
-            if case .available(let battery) = snapshot.battery {
-                MetricBar(
-                    label: "Battery",
-                    value: battery.percent.map(percent) ?? "Unavailable",
-                    fraction: battery.percent.map { $0 / 100 },
-                    color: battery.percent.map { $0 <= 15 ? .red : ($0 <= 30 ? .orange : .green) } ?? .secondary,
-                    detail: battery.isOnACPower ? "Adapter" : "Battery"
-                )
-            } else {
-                MetricRow(label: "Battery", value: "Unavailable", isUnavailable: true)
-            }
-            MetricRow(label: "Thermal State", value: snapshot.thermalState.rawValue.capitalized)
         }
     }
 
     @ViewBuilder
     private func codexSection(_ availability: Availability<CodexDiagnosticSnapshot>) -> some View {
         MonitorSection(title: "Codex", symbol: "terminal") {
-            switch availability {
-            case .available(let codex):
-                if let primary = codex.primaryLimit {
-                    MetricBar(
-                        label: "Current Window",
-                        value: "\(primary.remainingPercent)% remaining",
-                        fraction: Double(primary.remainingPercent) / 100,
-                        color: MetricColor.remaining(primary.remainingPercent),
-                        detail: primary.resetsAt.map { "Resets \($0.formatted(date: .omitted, time: .shortened))" }
-                    )
+            ModernSurface {
+                VStack(alignment: .leading, spacing: 10) {
+                    switch availability {
+                    case .available(let codex):
+                        if let primary = codex.primaryLimit {
+                            MetricBar(
+                                label: "Current Window",
+                                value: "\(primary.remainingPercent)% remaining",
+                                fraction: Double(primary.remainingPercent) / 100,
+                                color: MetricColor.remaining(primary.remainingPercent),
+                                detail: primary.resetsAt.map { "Resets \($0.formatted(date: .omitted, time: .shortened))" }
+                            )
+                        }
+                        if let secondary = codex.secondaryLimit {
+                            MetricBar(
+                                label: "Secondary Window",
+                                value: "\(secondary.remainingPercent)% remaining",
+                                fraction: Double(secondary.remainingPercent) / 100,
+                                color: MetricColor.remaining(secondary.remainingPercent)
+                            )
+                        }
+                        MetricRow(label: "Tokens Today", value: codex.tokensToday.map(formatCount) ?? "Unavailable")
+                        MetricRow(label: "Visible Threads", value: codex.threadCount.map(String.init) ?? "Unavailable")
+                        MetricRow(label: "Account", value: [codex.accountType, codex.planType].compactMap { $0 }.joined(separator: " / "))
+                        MetricRow(label: "Version", value: codex.version)
+                        ForEach(codex.notes, id: \.self) { note in
+                            MetricRow(label: "Note", value: note, isUnavailable: true)
+                        }
+                    case .unavailable(let reason):
+                        MetricRow(label: "Connection", value: reason, isUnavailable: true)
+                    case .failed(let message):
+                        MetricRow(label: "Connection", value: message, isUnavailable: true)
+                    }
                 }
-                if let secondary = codex.secondaryLimit {
-                    MetricBar(
-                        label: "Secondary Window",
-                        value: "\(secondary.remainingPercent)% remaining",
-                        fraction: Double(secondary.remainingPercent) / 100,
-                        color: MetricColor.remaining(secondary.remainingPercent)
-                    )
-                }
-                MetricRow(label: "Tokens Today", value: codex.tokensToday.map(formatCount) ?? "Unavailable")
-                MetricRow(label: "Visible Threads", value: codex.threadCount.map(String.init) ?? "Unavailable")
-                MetricRow(label: "Account", value: [codex.accountType, codex.planType].compactMap { $0 }.joined(separator: " / "))
-                MetricRow(label: "Version", value: codex.version)
-                ForEach(codex.notes, id: \.self) { note in
-                    MetricRow(label: "Note", value: note, isUnavailable: true)
-                }
-            case .unavailable(let reason):
-                MetricRow(label: "Connection", value: reason, isUnavailable: true)
-            case .failed(let message):
-                MetricRow(label: "Connection", value: message, isUnavailable: true)
             }
         }
     }
 
     private func sensorSection(_ snapshot: AdvancedSensorSnapshot) -> some View {
         MonitorSection(title: "Advanced Sensors", symbol: "sensor") {
-            MetricRow(label: "CPU Temperature", value: availabilityText(snapshot.cpuTemperature) { "\($0.formatted()) C" })
-            MetricRow(label: "GPU Utilization", value: availabilityText(snapshot.gpuUsage) { percent($0) })
-            MetricRow(label: "Fan Speed", value: availabilityText(snapshot.fanSpeeds) { readings in
-                readings.map { "\($0.rpm) RPM" }.joined(separator: ", ")
-            })
+            ModernSurface {
+                VStack(spacing: 4) {
+                    MetricRow(label: "CPU Temperature", value: availabilityText(snapshot.cpuTemperature) { "\($0.formatted()) C" })
+                    MetricRow(label: "GPU Utilization", value: availabilityText(snapshot.gpuUsage) { percent($0) })
+                    MetricRow(label: "Fan Speed", value: availabilityText(snapshot.fanSpeeds) { readings in
+                        readings.map { "\($0.rpm) RPM" }.joined(separator: ", ")
+                    })
+                }
+            }
         }
     }
 
@@ -337,9 +370,11 @@ private struct DiagnosticContentView: View {
 
     private func memoryColor(_ availability: Availability<MemoryReading>) -> Color {
         guard case .available(let value) = availability else { return .secondary }
-        return value.pressure == .normal
-            ? MetricColor.utilization(memoryPercent(availability) ?? 0)
-            : MetricColor.memoryPressure(value.pressure)
+        return memoryBarColor(usage: memoryPercent(availability) ?? 0, pressure: value.pressure)
+    }
+
+    private func memoryBarColor(usage: Double, pressure: MemoryPressure) -> Color {
+        pressure == .unavailable ? MetricColor.utilization(usage) : MetricColor.memoryPressure(pressure)
     }
 
     private func pressureValue(_ availability: Availability<MemoryReading>) -> String {
@@ -477,7 +512,7 @@ private struct MenuBarPanel: View {
                 label: "Memory",
                 value: percent(usage),
                 fraction: usage / 100,
-                color: memory.pressure == .normal ? MetricColor.utilization(usage) : MetricColor.memoryPressure(memory.pressure),
+                color: memory.pressure == .unavailable ? MetricColor.utilization(usage) : MetricColor.memoryPressure(memory.pressure),
                 detail: memory.pressure.rawValue.capitalized
             )
         } else {
@@ -553,13 +588,14 @@ private struct MetricRow: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 16) {
             Text(label)
+                .foregroundStyle(.secondary)
             Spacer(minLength: 24)
             Text(value.isEmpty ? "Unavailable" : value)
                 .foregroundStyle(isUnavailable || value.isEmpty ? .secondary : .primary)
                 .multilineTextAlignment(.trailing)
                 .textSelection(.enabled)
         }
-        .padding(.vertical, 8)
-        .overlay(alignment: .bottom) { Divider() }
+        .font(.subheadline)
+        .padding(.vertical, 5)
     }
 }

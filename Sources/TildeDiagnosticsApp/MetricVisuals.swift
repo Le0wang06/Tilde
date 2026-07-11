@@ -10,10 +10,24 @@ struct MonitorSection<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Label(title, systemImage: symbol)
-                .font(.headline)
-            Divider()
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
             content
         }
+    }
+}
+
+struct ModernSurface<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        content
+            .padding(16)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.primary.opacity(0.07), lineWidth: 1)
+            }
     }
 }
 
@@ -22,9 +36,10 @@ struct SummaryMetric: View {
     let value: String
     let detail: String
     let color: Color
+    var fraction: Double? = nil
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Circle()
                     .fill(color)
@@ -34,13 +49,23 @@ struct SummaryMetric: View {
                     .foregroundStyle(.secondary)
             }
             Text(value)
-                .font(.title2.monospacedDigit())
+                .font(.system(size: 25, weight: .semibold, design: .default).monospacedDigit())
             Text(detail)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+            if let fraction {
+                ColorBar(fraction: fraction, color: color)
+                    .padding(.top, 2)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+        }
         .accessibilityElement(children: .combine)
     }
 }
@@ -67,14 +92,30 @@ struct MetricBar: View {
                     .foregroundStyle(fraction == nil ? .secondary : .primary)
             }
             if let fraction {
-                ProgressView(value: min(1, max(0, fraction)))
-                    .progressViewStyle(.linear)
-                    .tint(color)
+                ColorBar(fraction: fraction, color: color)
                     .accessibilityLabel(label)
                     .accessibilityValue(value)
             }
         }
         .padding(.vertical, 4)
+    }
+}
+
+struct ColorBar: View {
+    let fraction: Double
+    let color: Color
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.primary.opacity(0.08))
+                Capsule()
+                    .fill(color)
+                    .frame(width: geometry.size.width * min(1, max(0, fraction)))
+            }
+        }
+        .frame(height: 5)
     }
 }
 
@@ -115,22 +156,16 @@ struct LiveResourceChart: View {
             }
             .chartYScale(domain: 0...100)
             .chartXAxis(.hidden)
-            .chartYAxis {
-                if !compact {
-                    AxisMarks(position: .leading, values: [0, 50, 100]) {
-                        AxisGridLine()
-                        AxisValueLabel()
-                    }
-                }
-            }
+            .chartYAxis(.hidden)
             .frame(height: compact ? 74 : 150)
             .accessibilityLabel("CPU and memory history")
         }
-        .padding(compact ? 0 : 12)
-        .background {
+        .padding(compact ? 0 : 16)
+        .background(compact ? AnyShapeStyle(.clear) : AnyShapeStyle(.regularMaterial), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
             if !compact {
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(Color(nsColor: .controlBackgroundColor))
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.primary.opacity(0.07), lineWidth: 1)
             }
         }
     }
@@ -169,19 +204,15 @@ struct LiveNetworkChart: View {
                 }
             }
             .chartXAxis(.hidden)
-            .chartYAxis {
-                AxisMarks(position: .leading) {
-                    AxisGridLine()
-                    AxisValueLabel()
-                }
-            }
+            .chartYAxis(.hidden)
             .frame(height: 150)
             .accessibilityLabel("Network throughput history in megabits per second")
         }
-        .padding(12)
-        .background {
-            RoundedRectangle(cornerRadius: 6)
-                .fill(Color(nsColor: .controlBackgroundColor))
+        .padding(16)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.primary.opacity(0.07), lineWidth: 1)
         }
     }
 }
