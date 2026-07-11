@@ -15,18 +15,18 @@ struct TildeDiagnosticsApp: App {
 @MainActor
 private final class DiagnosticViewModel: ObservableObject {
     @Published var report: DiagnosticReport?
-    @Published var isRunning = false
+    @Published var runState = DiagnosticRunState.idle
     private let coordinator = MonitoringCoordinator()
     private var refreshTask: Task<Void, Never>?
 
     func refresh() {
         refreshTask?.cancel()
-        isRunning = true
+        runState.apply(.start)
         refreshTask = Task {
             let report = await coordinator.runDiagnostics()
             guard !Task.isCancelled else { return }
             self.report = report
-            isRunning = false
+            runState.apply(.finish)
         }
     }
 }
@@ -71,7 +71,7 @@ private struct DiagnosticContentView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            if model.isRunning {
+            if model.runState == .running {
                 ProgressView()
                     .controlSize(.small)
             }
@@ -80,7 +80,7 @@ private struct DiagnosticContentView: View {
             } label: {
                 Label("Run Diagnostics", systemImage: "arrow.clockwise")
             }
-            .disabled(model.isRunning)
+            .disabled(model.runState == .running)
         }
         .padding(16)
     }
