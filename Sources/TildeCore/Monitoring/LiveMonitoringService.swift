@@ -1,7 +1,14 @@
 import Foundation
 
+public protocol LiveDiagnosticCoordinating: Sendable {
+    func sampleSystem(previous: SystemSnapshot?, metrics: Set<LiveMetric>) async -> SystemSnapshot
+    func runCodexDiagnostics() async -> Availability<CodexDiagnosticSnapshot>
+}
+
+extension MonitoringCoordinator: LiveDiagnosticCoordinating {}
+
 public actor LiveMonitoringService {
-    private let coordinator: MonitoringCoordinator
+    private let coordinator: any LiveDiagnosticCoordinating
     private let policy: AdaptiveSamplingPolicy
     private var continuations: [UUID: AsyncStream<DiagnosticReport>.Continuation] = [:]
     private var activePresentations = Set<UUID>()
@@ -12,7 +19,7 @@ public actor LiveMonitoringService {
     private var pendingForcedRefresh = false
 
     public init(
-        coordinator: MonitoringCoordinator = MonitoringCoordinator(),
+        coordinator: any LiveDiagnosticCoordinating = MonitoringCoordinator(),
         policy: AdaptiveSamplingPolicy = .standard
     ) {
         self.coordinator = coordinator
