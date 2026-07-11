@@ -5,7 +5,17 @@ import TildeCore
 @main
 struct TildeDiagnosticsApp: App {
     @NSApplicationDelegateAdaptor(TildeAppDelegate.self) private var appDelegate
-    @StateObject private var model = DiagnosticViewModel()
+    @StateObject private var model: DiagnosticViewModel
+
+    init() {
+        let model = DiagnosticViewModel()
+        _model = StateObject(wrappedValue: model)
+        // Start sampling at launch so the menu-bar title can show AI %
+        // without waiting for the panel or main window to open.
+        Task { @MainActor in
+            model.startIfNeeded()
+        }
+    }
 
     var body: some Scene {
         WindowGroup("Tilde", id: "diagnostics") {
@@ -15,11 +25,10 @@ struct TildeDiagnosticsApp: App {
         }
         .defaultSize(width: 920, height: 780)
 
-        MenuBarExtra {
+        // Title text is rendered in the macOS menu bar (top of screen).
+        MenuBarExtra(model.menuBarTitle, systemImage: model.menuBarSymbol) {
             MenuBarPanel()
                 .environmentObject(model)
-        } label: {
-            Label("Tilde", systemImage: model.menuBarSymbol)
         }
         .menuBarExtraStyle(.window)
     }
@@ -38,9 +47,12 @@ final class DiagnosticViewModel: ObservableObject {
     @Published var report: DiagnosticReport?
     @Published var runState = DiagnosticRunState.idle
     @Published private(set) var history: [LiveMetricSample] = []
+    /// Compact Codex remaining % shown in the macOS menu bar title.
+    @Published private(set) var menuBarTitle: String = "…"
     private let liveMonitoring = LiveMonitoringService()
     private var historyBuffer = LiveMetricHistory()
     private var subscriptionTask: Task<Void, Never>?
+    private let menuBarPresentationID = UUID()
 
     var menuBarSymbol: String {
         if runState == .running { return "ellipsis.circle" }
@@ -55,17 +67,32 @@ final class DiagnosticViewModel: ObservableObject {
     func startIfNeeded() {
         guard subscriptionTask == nil else { return }
         runState.apply(.start)
+        // Keep background sampling active for the menu-bar title even when
+        // the panel / window are closed.
+        Task {
+            await liveMonitoring.setPresentation(menuBarPresentationID, isActive: true)
+        }
         subscriptionTask = Task { [weak self] in
             guard let self else { return }
             let reports = await liveMonitoring.reports()
             for await report in reports {
                 guard !Task.isCancelled else { break }
-                self.report = report
-                self.historyBuffer.append(LiveMetricSample(snapshot: report.system))
-                self.history = self.historyBuffer.samples
-                self.runState.apply(.finish)
+                self.apply(report: report)
             }
         }
+    }
+
+    private func apply(report: DiagnosticReport) {
+        self.report = report
+        historyBuffer.append(LiveMetricSample(snapshot: report.system))
+        history = historyBuffer.samples
+        if case .available(let codex) = report.codex,
+           let remaining = codex.primaryLimit?.remainingPercent {
+            menuBarTitle = "\(remaining)%"
+        } else {
+            menuBarTitle = "—"
+        }
+        runState.apply(.finish)
     }
 
     func refresh() {
