@@ -47,7 +47,7 @@ Tested on July 10, 2026 with an Apple M5 Pro MacBook Pro, macOS 26.5, Swift 6.3.
 ## Verification
 
 - `swift build`: passes
-- `./Scripts/test.sh`: 10 tests pass
+- `./Scripts/test.sh`: 13 tests pass
 - `swift run tilde-probe`: public system metrics and Codex connectivity pass on the tested Mac
 - Native GUI target: compiles and launches through `swift run TildeDiagnostics`
 
@@ -57,7 +57,7 @@ The test script uses Apple's Swift Testing framework because this machine does n
 
 - CPU temperature, GPU utilization, and fan RPM remain unavailable by design. A hardware feasibility spike must evaluate a separately isolated sensor adapter and device support before these can ship.
 - Exact active-agent state and streamed turn-event mapping belong to Phase 3. Phase 0 only verifies that the App Server can initialize and expose account/usage/thread data.
-- A minimal `MenuBarExtra` was added after Phase 0 for local access. Full menu sections, continuous adaptive sampling, persistence, history, alerts, notifications, process management, and polished navigation remain deferred.
+- A minimal `MenuBarExtra` and adaptive in-memory live sampling were added after Phase 0 for local access. Full menu sections, persistence, history, alerts, notifications, process management, and polished navigation remain deferred.
 - Full Xcode is required before XCTest, XCUITest, app bundles, signing, notarization, and UI automation can be verified.
 
 ## Codex protocol basis

@@ -47,6 +47,22 @@ Run calculation and state tests:
 - Codex App Server initialization, account, rate-limit, token-usage, and thread-list probes
 - Native `MenuBarExtra` with health summary, refresh, open-window, and quit actions
 
+## Live updates
+
+Tilde publishes local snapshots through a shared `AsyncStream` with newest-value buffering. The main window and menu-bar panel subscribe to the same sampling pipeline, so opening both does not duplicate system or Codex work.
+
+Sampling adapts to visibility:
+
+| Metric | Tilde visible | Background |
+| --- | ---: | ---: |
+| CPU and network | 1 second | 5 seconds |
+| Memory and thermal state | 2 seconds | 10 seconds |
+| Battery | 15 seconds | 60 seconds |
+| Storage | 60 seconds | 5 minutes |
+| Codex usage | 60 seconds | 2 minutes |
+
+Manual refresh forces all metrics. Live samples stay in memory and are not written to disk.
+
 No prompts, source code, terminal output, auth tokens, or account email are stored or printed.
 
 See [Phase 0 Feasibility](Docs/Phase-0-Feasibility.md) for tested results and remaining limitations.
