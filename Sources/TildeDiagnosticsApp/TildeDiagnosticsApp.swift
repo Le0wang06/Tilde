@@ -716,15 +716,16 @@ struct MenuBarPanel: View {
     }
 
     private var fanCard: some View {
-        ControlCenterCard {
+        let isOn = model.isFanBoostEnabled
+        return ControlCenterCard {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 6) {
                     Image(systemName: "fan")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(isOn ? Color.green : Color.secondary)
                     Text("FAN")
                         .font(.caption.weight(.bold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(isOn ? Color.green : Color.secondary)
                     Spacer(minLength: 4)
                     Toggle("", isOn: Binding(
                         get: { model.isFanBoostEnabled },
@@ -733,15 +734,16 @@ struct MenuBarPanel: View {
                     .toggleStyle(.switch)
                     .labelsHidden()
                     .controlSize(.mini)
-                    .tint(.blue)
+                    .tint(.green)
                     .accessibilityLabel("Fan Boost")
                 }
 
-                FanWindAnimationView(isRunning: model.isFanBoostEnabled)
+                FanWindAnimationView(isRunning: isOn)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(model.fanBoost.statusText)
                         .font(.caption.weight(.semibold))
+                        .foregroundStyle(isOn ? Color.green : Color.primary)
                     Text(model.fanBoost.detailText)
                         .font(.caption2)
                         .foregroundStyle(.secondary)

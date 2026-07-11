@@ -1,8 +1,10 @@
 import SwiftUI
 
-/// Spinning fan with side wind stream — shown when Fan Boost is enabled.
+/// Spinning fan with side wind stream — green while Fan Boost is running.
 struct FanWindAnimationView: View {
     var isRunning: Bool
+
+    private var accent: Color { isRunning ? .green : .secondary }
 
     var body: some View {
         HStack(spacing: 10) {
@@ -11,17 +13,17 @@ struct FanWindAnimationView: View {
                 let degrees = isRunning ? (seconds * 640).truncatingRemainder(dividingBy: 360) : 0
                 ZStack {
                     Circle()
-                        .fill(Color.blue.opacity(isRunning ? 0.16 : 0.06))
+                        .fill(accent.opacity(isRunning ? 0.22 : 0.06))
                         .frame(width: 54, height: 54)
                     Image(systemName: "fanblades.fill")
                         .font(.system(size: 26, weight: .regular))
-                        .foregroundStyle(isRunning ? Color.blue : Color.secondary)
+                        .foregroundStyle(accent)
                         .rotationEffect(.degrees(degrees))
                 }
                 .frame(width: 54, height: 54)
             }
 
-            WindStreamView(isRunning: isRunning)
+            WindStreamView(isRunning: isRunning, tint: accent)
                 .frame(maxWidth: .infinity, minHeight: 42, maxHeight: 42)
         }
         .animation(.easeInOut(duration: 0.2), value: isRunning)
@@ -30,6 +32,7 @@ struct FanWindAnimationView: View {
 
 private struct WindStreamView: View {
     var isRunning: Bool
+    var tint: Color
 
     var body: some View {
         TimelineView(.animation(minimumInterval: isRunning ? 1.0 / 30.0 : 1.0, paused: !isRunning)) { timeline in
@@ -51,7 +54,7 @@ private struct WindStreamView: View {
                     )
                     context.stroke(
                         path,
-                        with: .color(Color.blue.opacity(isRunning ? 0.55 - Double(index) * 0.07 : 0.12)),
+                        with: .color(tint.opacity(isRunning ? 0.65 - Double(index) * 0.08 : 0.12)),
                         style: StrokeStyle(lineWidth: isRunning ? 2 : 1, lineCap: .round)
                     )
                 }
