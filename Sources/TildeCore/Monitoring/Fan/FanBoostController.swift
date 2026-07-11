@@ -14,6 +14,7 @@ import Foundation
 public actor FanBoostController {
     public enum Mode: String, Sendable, Equatable {
         case off
+        case starting
         case hardwareBoost
         case needsPrivilege
         case failed
@@ -25,6 +26,14 @@ public actor FanBoostController {
         public var statusText: String
         public var detailText: String
         public var rpm: Int?
+
+        /// True only when fans are confirmed boosted — use for green UI / tilde spray.
+        public var isActivelyBoosting: Bool { mode == .hardwareBoost }
+
+        /// True while waiting on admin, daemon, or fan spin-up.
+        public var isPending: Bool {
+            mode == .starting || mode == .needsPrivilege
+        }
 
         public init(
             isEnabled: Bool,
@@ -45,7 +54,7 @@ public actor FanBoostController {
             mode: .off,
             statusText: "Off",
             detailText: "Tap to boost cooling",
-            rpm: nil
+            rpm: 0
         )
     }
 
@@ -65,7 +74,8 @@ public actor FanBoostController {
         let looksBoosted = fans.contains(where: isBoosted)
         let daemonUp = FanDaemonClient.isAvailable()
 
-        if enabled, daemonUp || looksBoosted, mode == .failed || mode == .needsPrivilege {
+        // Promote starting → on only once fans (or target) actually show boost.
+        if enabled, looksBoosted, mode == .starting || mode == .needsPrivilege {
             mode = .hardwareBoost
             lastError = nil
         }
@@ -76,11 +86,19 @@ public actor FanBoostController {
                 mode: .off,
                 statusText: "Off",
                 detailText: "Tap to boost cooling",
-                rpm: rpm
+                rpm: 0
             )
         }
 
         switch mode {
+        case .starting:
+            return Snapshot(
+                isEnabled: true,
+                mode: .starting,
+                statusText: "Starting…",
+                detailText: "0 RPM · spinning fans up",
+                rpm: 0
+            )
         case .hardwareBoost:
             let detail: String
             if let rpm, rpm > 0 {
@@ -102,8 +120,8 @@ public actor FanBoostController {
                 isEnabled: true,
                 mode: .needsPrivilege,
                 statusText: "Waiting for access",
-                detailText: "Admin approval required once to control fans",
-                rpm: rpm
+                detailText: "Approve admin once — then toggles stay unlocked",
+                rpm: 0
             )
         case .failed:
             return Snapshot(
@@ -111,7 +129,7 @@ public actor FanBoostController {
                 mode: .failed,
                 statusText: "Boost failed",
                 detailText: lastError ?? "Could not control fans on this Mac",
-                rpm: rpm
+                rpm: rpm ?? 0
             )
         case .off:
             return .idle
@@ -121,8 +139,15 @@ public actor FanBoostController {
     public func setEnabled(_ on: Bool, thermalState: TildeThermalState) async -> Snapshot {
         if on {
             enabled = true
+            mode = .starting
+            lastError = nil
             await applyBoost(privilegedFallback: true)
-            startKeepAlive()
+            if mode != .failed && mode != .needsPrivilege {
+                await waitUntilBoostedOrTimeout()
+            }
+            if mode != .failed {
+                startKeepAlive()
+            }
         } else {
             keepAliveTask?.cancel()
             keepAliveTask = nil
@@ -132,6 +157,27 @@ public actor FanBoostController {
             lastError = nil
         }
         return currentSnapshot(thermalState: thermalState)
+    }
+
+    /// Don't claim "Boost On" until fans/target look boosted (or a short timeout if RPM stays 0).
+    private func waitUntilBoostedOrTimeout() async {
+        for _ in 0..<40 {
+            if !enabled { return }
+            if mode == .failed { return }
+            let fans = (try? SMC().readFans()) ?? []
+            if fans.contains(where: isBoosted) {
+                mode = .hardwareBoost
+                lastError = nil
+                return
+            }
+            mode = mode == .needsPrivilege ? .needsPrivilege : .starting
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+        // Apple Silicon sometimes reports 0 actual RPM; if the command armed successfully,
+        // promote after the wait so we don't stay on Starting forever.
+        if mode == .starting {
+            mode = .hardwareBoost
+        }
     }
 
     private func startKeepAlive() {
@@ -150,7 +196,8 @@ public actor FanBoostController {
     private func applyBoost(privilegedFallback: Bool) async {
         do {
             try boostInProcess()
-            mode = .hardwareBoost
+            // Command succeeded — stay on Starting until fans confirm.
+            if mode != .hardwareBoost { mode = .starting }
             lastError = nil
             return
         } catch {
@@ -163,20 +210,20 @@ public actor FanBoostController {
         if FanDaemonClient.isAvailable() {
             do {
                 try FanDaemonClient.send(FanDaemonProtocol.boost)
-                mode = .hardwareBoost
+                if mode != .hardwareBoost { mode = .starting }
                 lastError = nil
                 return
             } catch {
                 // Fall through and try (re)starting if allowed.
                 if !privilegedFallback {
-                    if mode == .hardwareBoost { return }
+                    if mode == .hardwareBoost || mode == .starting { return }
                     mode = .needsPrivilege
                     lastError = error.localizedDescription
                     return
                 }
             }
         } else if !privilegedFallback {
-            if mode == .hardwareBoost { return }
+            if mode == .hardwareBoost || mode == .starting { return }
             mode = .needsPrivilege
             lastError = error.localizedDescription
             return
@@ -186,13 +233,13 @@ public actor FanBoostController {
         do {
             try await ensurePrivilegedDaemon()
             try FanDaemonClient.send(FanDaemonProtocol.boost)
-            mode = .hardwareBoost
+            mode = .starting
             lastError = nil
         } catch {
             // Fall back to a one-shot privileged hold if the daemon failed to detach.
             do {
                 try await startPrivilegedHoldFallback()
-                mode = .hardwareBoost
+                mode = .starting
                 lastError = nil
             } catch {
                 mode = .failed

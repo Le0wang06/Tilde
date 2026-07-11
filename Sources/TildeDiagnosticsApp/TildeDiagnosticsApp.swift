@@ -209,19 +209,13 @@ final class DiagnosticViewModel: ObservableObject {
         if enabled {
             fanBoost = FanBoostController.Snapshot(
                 isEnabled: true,
-                mode: .needsPrivilege,
-                statusText: "Waiting for access",
-                detailText: "Approve admin once — then toggles stay unlocked",
-                rpm: fanBoost.rpm
+                mode: .starting,
+                statusText: "Starting…",
+                detailText: "0 RPM · spinning fans up",
+                rpm: 0
             )
         } else {
-            fanBoost = FanBoostController.Snapshot(
-                isEnabled: false,
-                mode: .off,
-                statusText: "Off",
-                detailText: "Stopping boost…",
-                rpm: fanBoost.rpm
-            )
+            fanBoost = .idle
         }
         Task {
             let snapshot = await fanBoostController.setEnabled(enabled, thermalState: thermal)
@@ -820,16 +814,17 @@ struct MenuBarPanel: View {
     }
 
     private var fanCard: some View {
-        let isOn = model.isFanBoostEnabled
+        let isActive = model.fanBoost.isActivelyBoosting
+        let isPending = model.fanBoost.isPending
         return ControlCenterCard {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 6) {
                     Image(systemName: "fan")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(isOn ? Color.green : Color.secondary)
+                        .foregroundStyle(isActive ? Color.green : Color.secondary)
                     Text("FAN")
                         .font(.caption.weight(.bold))
-                        .foregroundStyle(isOn ? Color.green : Color.secondary)
+                        .foregroundStyle(isActive ? Color.green : Color.secondary)
                     Spacer(minLength: 4)
                     Toggle("", isOn: Binding(
                         get: { model.isFanBoostEnabled },
@@ -837,15 +832,22 @@ struct MenuBarPanel: View {
                     ))
                     .toggleStyle(FanBoostToggleStyle())
                     .labelsHidden()
+                    .disabled(isPending)
                     .accessibilityLabel("Fan Boost")
                 }
 
-                FanWindAnimationView(isRunning: isOn)
+                FanWindAnimationView(isRunning: isActive)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(model.fanBoost.statusText)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(isOn ? Color.green : Color.primary)
+                    HStack(spacing: 6) {
+                        if isPending {
+                            ProgressView()
+                                .controlSize(.mini)
+                        }
+                        Text(model.fanBoost.statusText)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(isActive ? Color.green : Color.primary)
+                    }
                     Text(model.fanBoost.detailText)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
