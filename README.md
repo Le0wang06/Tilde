@@ -46,7 +46,7 @@ Run calculation and state tests:
 - Codex executable/version detection
 - Codex App Server initialization, account, rate-limit, token-usage, and thread-list probes
 - Native `MenuBarExtra` with health summary, refresh, open-window, and quit actions
-- Menu bar title shows Codex AI remaining percentage (e.g. `67%`) at the top of the screen
+- Menu bar title shows a tilde mark with remaining allowance and tokens used today (e.g. `~ 67% · 12K`) as an AppKit status item at the top of the screen
 
 ## Live updates
 

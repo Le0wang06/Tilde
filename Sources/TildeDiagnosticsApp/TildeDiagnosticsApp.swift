@@ -10,10 +10,9 @@ struct TildeDiagnosticsApp: App {
     init() {
         let model = DiagnosticViewModel()
         _model = StateObject(wrappedValue: model)
-        // Start sampling at launch so the menu-bar title can show AI %
-        // without waiting for the panel or main window to open.
         Task { @MainActor in
             model.startIfNeeded()
+            MenuBarStatusItemController.shared.install(model: model)
         }
     }
 
@@ -22,15 +21,12 @@ struct TildeDiagnosticsApp: App {
             DiagnosticContentView()
                 .environmentObject(model)
                 .frame(minWidth: 760, minHeight: 560)
+                .onReceive(NotificationCenter.default.publisher(for: .tildeOpenMainWindow)) { _ in
+                    NSApp.activate(ignoringOtherApps: true)
+                }
         }
         .defaultSize(width: 920, height: 780)
-
-        // Title text is rendered in the macOS menu bar (top of screen).
-        MenuBarExtra(model.menuBarTitle, systemImage: model.menuBarSymbol) {
-            MenuBarPanel()
-                .environmentObject(model)
-        }
-        .menuBarExtraStyle(.window)
+        // Menu bar item is an AppKit NSStatusItem so the AI % text is always visible.
     }
 }
 
@@ -48,7 +44,7 @@ final class DiagnosticViewModel: ObservableObject {
     @Published var runState = DiagnosticRunState.idle
     @Published private(set) var history: [LiveMetricSample] = []
     /// Compact Codex remaining % shown in the macOS menu bar title.
-    @Published private(set) var menuBarTitle: String = "…"
+    @Published private(set) var menuBarTitle: String = "~ …"
     private let liveMonitoring = LiveMonitoringService()
     private var historyBuffer = LiveMetricHistory()
     private var subscriptionTask: Task<Void, Never>?
@@ -86,13 +82,29 @@ final class DiagnosticViewModel: ObservableObject {
         self.report = report
         historyBuffer.append(LiveMetricSample(snapshot: report.system))
         history = historyBuffer.samples
-        if case .available(let codex) = report.codex,
-           let remaining = codex.primaryLimit?.remainingPercent {
-            menuBarTitle = "\(remaining)%"
-        } else {
-            menuBarTitle = "—"
-        }
+        menuBarTitle = Self.makeMenuBarTitle(from: report.codex)
+        MenuBarStatusItemController.shared.updateTitle(menuBarTitle)
+        NotificationCenter.default.post(
+            name: .tildeMenuBarTitleDidChange,
+            object: nil,
+            userInfo: ["title": menuBarTitle]
+        )
         runState.apply(.finish)
+    }
+
+    private static func makeMenuBarTitle(from codex: Availability<CodexDiagnosticSnapshot>) -> String {
+        guard case .available(let snapshot) = codex else {
+            return "~ —"
+        }
+
+        let remaining = snapshot.primaryLimit.map { "\($0.remainingPercent)%" } ?? "—"
+        let tokens: String
+        if let tokensToday = snapshot.tokensToday {
+            tokens = tokensToday.formatted(.number.notation(.compactName))
+        } else {
+            tokens = "—"
+        }
+        return "~ \(remaining) · \(tokens)"
     }
 
     func refresh() {
@@ -442,9 +454,8 @@ private struct DiagnosticContentView: View {
     }
 }
 
-private struct MenuBarPanel: View {
+struct MenuBarPanel: View {
     @EnvironmentObject private var model: DiagnosticViewModel
-    @Environment(\.openWindow) private var openWindow
     @State private var presentationID = UUID()
 
     var body: some View {
@@ -490,8 +501,11 @@ private struct MenuBarPanel: View {
 
             HStack(spacing: 8) {
                 Button {
-                    openWindow(id: "diagnostics")
+                    NotificationCenter.default.post(name: .tildeOpenMainWindow, object: nil)
                     NSApp.activate(ignoringOtherApps: true)
+                    for window in NSApp.windows where window.isVisible || window.title.contains("Tilde") {
+                        window.makeKeyAndOrderFront(nil)
+                    }
                 } label: {
                     Label("Open Tilde", systemImage: "macwindow")
                 }
