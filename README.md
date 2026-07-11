@@ -63,6 +63,17 @@ Sampling adapts to visibility:
 
 Manual refresh forces all metrics. Live samples stay in memory and are not written to disk.
 
+## Native interface
+
+The full window and menu-bar panel use the same restrained native visual system:
+
+- Swift Charts backed by real bounded in-memory samples
+- Compact metric tiles and axis-free live graphs
+- Thin semantic capacity bars rather than oversized dashboard cards
+- Memory color driven primarily by macOS memory pressure, not merely occupied RAM
+- System materials, SF Symbols, native typography, and light/dark appearance support
+- Green, orange, and red reserved for healthy, elevated, and critical states
+
 No prompts, source code, terminal output, auth tokens, or account email are stored or printed.
 
 See [Phase 0 Feasibility](Docs/Phase-0-Feasibility.md) for tested results and remaining limitations.

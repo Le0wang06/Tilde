@@ -47,7 +47,7 @@ Tested on July 10, 2026 with an Apple M5 Pro MacBook Pro, macOS 26.5, Swift 6.3.
 ## Verification
 
 - `swift build`: passes
-- `./Scripts/test.sh`: 13 tests pass
+- `./Scripts/test.sh`: 15 tests pass
 - `swift run tilde-probe`: public system metrics and Codex connectivity pass on the tested Mac
 - Native GUI target: compiles and launches through `swift run TildeDiagnostics`
 
