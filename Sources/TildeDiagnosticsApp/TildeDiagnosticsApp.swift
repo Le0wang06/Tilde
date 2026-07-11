@@ -533,31 +533,25 @@ struct MenuBarPanel: View {
 
     @ViewBuilder
     private func metricGrid(_ report: DiagnosticReport) -> some View {
-        Grid(horizontalSpacing: 10, verticalSpacing: 10) {
-            GridRow {
-                cpuCard(report)
-                    .frame(maxWidth: .infinity, minHeight: 148, maxHeight: .infinity, alignment: .topLeading)
+        // Two independent columns avoid Grid row height matching, which left
+        // empty space under the shorter CPU card before FAN started.
+        VStack(spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                VStack(spacing: 10) {
+                    cpuCard(report)
+                    fanCard
+                }
+                .frame(maxWidth: .infinity, alignment: .top)
+
                 VStack(spacing: 10) {
                     memoryCard(report)
-                        .frame(maxWidth: .infinity, minHeight: 69, alignment: .topLeading)
                     storageCard(report)
-                        .frame(maxWidth: .infinity, minHeight: 69, alignment: .topLeading)
+                    networkCard(report.system.network)
                 }
-                .frame(maxWidth: .infinity, minHeight: 148)
+                .frame(maxWidth: .infinity, alignment: .top)
             }
 
-            GridRow {
-                fanCard
-                    .frame(maxWidth: .infinity, minHeight: 118, maxHeight: .infinity, alignment: .topLeading)
-                networkCard(report.system.network)
-                    .frame(maxWidth: .infinity, minHeight: 118, maxHeight: .infinity, alignment: .topLeading)
-            }
-
-            GridRow {
-                codexCard(report)
-                    .gridCellColumns(2)
-                    .frame(maxWidth: .infinity, minHeight: 96, alignment: .topLeading)
-            }
+            codexCard(report)
         }
     }
 
@@ -861,7 +855,7 @@ private struct ControlCenterCard<Content: View>: View {
     var body: some View {
         content
             .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
             .background {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .fill(.regularMaterial)
