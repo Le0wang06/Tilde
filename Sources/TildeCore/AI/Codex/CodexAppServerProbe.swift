@@ -1,5 +1,40 @@
 @preconcurrency import Foundation
 
+private final class CodexOutputCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data = Data()
+    private var pending = Data()
+    private var responseIDs = Set<Int>()
+    let completion = DispatchSemaphore(value: 0)
+
+    func append(_ chunk: Data) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !chunk.isEmpty else {
+            completion.signal()
+            return
+        }
+
+        data.append(chunk)
+        pending.append(chunk)
+        while let newline = pending.firstIndex(of: 0x0A) {
+            let line = pending[..<newline]
+            pending.removeSubrange(...newline)
+            if let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+               let id = object["id"] as? Int {
+                responseIDs.insert(id)
+            }
+        }
+        if responseIDs.isSuperset(of: [1, 2, 3, 4, 5]) {
+            completion.signal()
+        }
+    }
+
+    func collectedData() -> Data {
+        lock.withLock { data }
+    }
+}
+
 public actor CodexAppServerProbe: MetricProvider {
     private let environment: [String: String]
 
@@ -36,6 +71,10 @@ public actor CodexAppServerProbe: MetricProvider {
         process.standardError = errors
 
         try process.run()
+        let collector = CodexOutputCollector()
+        output.fileHandleForReading.readabilityHandler = { handle in
+            collector.append(handle.availableData)
+        }
         let requests: [[String: Any]] = [
             [
                 "id": 1,
@@ -57,15 +96,18 @@ public actor CodexAppServerProbe: MetricProvider {
             input.fileHandleForWriting.write(data)
             input.fileHandleForWriting.write(Data([0x0A]))
         }
+
+        let completed = collector.completion.wait(timeout: .now() + 10) == .success
         try input.fileHandleForWriting.close()
-
-        let stdout = output.fileHandleForReading.readDataToEndOfFile()
-        let stderr = errors.fileHandleForReading.readDataToEndOfFile()
+        output.fileHandleForReading.readabilityHandler = nil
+        if process.isRunning { process.terminate() }
         process.waitUntilExit()
+        let stderr = errors.fileHandleForReading.readDataToEndOfFile()
+        let stdout = collector.collectedData()
 
-        guard process.terminationStatus == 0 else {
+        guard completed else {
             let message = String(decoding: stderr, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-            throw MetricError.invalidResponse(message.isEmpty ? "Codex App Server exited with status \(process.terminationStatus)" : message)
+            throw MetricError.invalidResponse(message.isEmpty ? "Codex App Server timed out waiting for diagnostic responses" : message)
         }
 
         return try parseResponses(
@@ -114,9 +156,9 @@ public actor CodexAppServerProbe: MetricProvider {
         let threads = threadResult?["data"] as? [[String: Any]]
 
         var notes: [String] = []
-        if responses[3]?["error"] != nil { notes.append("Codex rate limits are unavailable for this account") }
-        if responses[4]?["error"] != nil { notes.append("Codex token usage is unavailable for this account or CLI version") }
-        if responses[5]?["error"] != nil { notes.append("Codex thread inventory is unavailable") }
+        if limitsResult == nil { notes.append(responseNote(responses[3], fallback: "Codex rate limits are unavailable for this account")) }
+        if usageResult == nil { notes.append(responseNote(responses[4], fallback: "Codex token usage is unavailable for this account or CLI version")) }
+        if threadResult == nil { notes.append(responseNote(responses[5], fallback: "Codex thread inventory is unavailable")) }
 
         return CodexDiagnosticSnapshot(
             executablePath: executablePath,
@@ -135,6 +177,12 @@ public actor CodexAppServerProbe: MetricProvider {
 
     private static func resultDictionary(_ response: [String: Any]?) -> [String: Any]? {
         response?["result"] as? [String: Any]
+    }
+
+    private static func responseNote(_ response: [String: Any]?, fallback: String) -> String {
+        guard let error = response?["error"] as? [String: Any],
+              let message = error["message"] as? String else { return fallback }
+        return "\(fallback): \(message)"
     }
 
     private static func parseWindow(_ dictionary: [String: Any]?) -> CodexRateLimitWindow? {
