@@ -16,8 +16,10 @@ enum TildeFanCLI {
                 try runHold()
             case "auto":
                 try runAuto()
+            case "daemon":
+                try runDaemon(args: Array(args.dropFirst()))
             default:
-                fputs("Usage: tilde-fan status|boost|hold|auto\n", stderr)
+                fputs("Usage: tilde-fan status|boost|hold|auto|daemon\n", stderr)
                 exit(64)
             }
         } catch {
@@ -52,7 +54,7 @@ enum TildeFanCLI {
         }
     }
 
-    /// Keep re-applying boost until SIGTERM/SIGINT (used after one admin prompt).
+    /// Keep re-applying boost until SIGTERM/SIGINT (legacy one-shot hold).
     private static func runHold() throws {
         signal(SIGTERM, SIG_DFL)
         signal(SIGINT, SIG_DFL)
@@ -69,7 +71,6 @@ enum TildeFanCLI {
         signal(SIGTERM, SIG_IGN)
         signal(SIGINT, SIG_IGN)
 
-        // Apply immediately, then refresh so thermalmonitord cannot reclaim control.
         while !shouldStop {
             try runBoost()
             for _ in 0..<16 {
@@ -87,5 +88,28 @@ enum TildeFanCLI {
             print("fan\(fan.index) -> auto")
         }
         try? smc.resetFanTestUnlock()
+    }
+
+    /// Privileged long-lived control plane. Password once; then app sends boost/auto on the socket.
+    private static func runDaemon(args: [String]) throws {
+        var socketPath: String?
+        var ownerUID = getuid()
+        var index = 0
+        while index < args.count {
+            let arg = args[index]
+            if arg == "--socket", index + 1 < args.count {
+                socketPath = args[index + 1]
+                index += 2
+            } else if arg == "--uid", index + 1 < args.count {
+                ownerUID = uid_t(UInt32(args[index + 1]) ?? UInt32(getuid()))
+                index += 2
+            } else {
+                index += 1
+            }
+        }
+
+        let path = socketPath ?? FanDaemonProtocol.socketURL(uid: ownerUID).path
+        let server = FanDaemonServer(socketPath: path, ownerUID: ownerUID)
+        try server.run()
     }
 }

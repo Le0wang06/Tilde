@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// Coordinates fan boost for Tilde.
@@ -5,10 +6,9 @@ import Foundation
 /// Reads SMC fan RPM in-process. Writes require root on Apple Silicon, so
 /// when the toggle turns on we:
 /// 1. try an in-process SMC write
-/// 2. if permission is denied, start `tilde-fan hold` once with an admin prompt
-///    (it re-applies the target every few seconds so thermalmonitord cannot reclaim)
-/// 3. never downgrade a working boost to "failed" just because an unprivileged
-///    keep-alive rewrite is denied
+/// 2. if that fails, talk to a privileged `tilde-fan daemon` over a local socket
+/// 3. if the daemon is not running yet, start it once with an admin password prompt
+///    and keep it alive so later toggles do not ask again
 ///
 /// SMC client code is adapted from [macfanctl](https://github.com/2dubu/macfanctl) (MIT).
 public actor FanBoostController {
@@ -26,6 +26,20 @@ public actor FanBoostController {
         public var detailText: String
         public var rpm: Int?
 
+        public init(
+            isEnabled: Bool,
+            mode: Mode,
+            statusText: String,
+            detailText: String,
+            rpm: Int? = nil
+        ) {
+            self.isEnabled = isEnabled
+            self.mode = mode
+            self.statusText = statusText
+            self.detailText = detailText
+            self.rpm = rpm
+        }
+
         public static let idle = Snapshot(
             isEnabled: false,
             mode: .off,
@@ -39,7 +53,7 @@ public actor FanBoostController {
     private var mode: Mode = .off
     private var lastError: String?
     private var keepAliveTask: Task<Void, Never>?
-    private var privilegedHoldProcess: Process?
+    private var daemonStartProcess: Process?
     private let boostFraction = 0.85
 
     public init() {}
@@ -49,15 +63,9 @@ public actor FanBoostController {
         let rpm = fans.map(\.actualRPM).max()
         let target = fans.map(\.targetRPM).max()
         let looksBoosted = fans.contains(where: isBoosted)
+        let daemonUp = FanDaemonClient.isAvailable()
 
-        // Hold process still running means boost is actively maintained.
-        if enabled, privilegedHoldProcess?.isRunning == true, mode != .hardwareBoost {
-            mode = .hardwareBoost
-            lastError = nil
-        }
-
-        // Heal false "failed" when fans are clearly boosted.
-        if enabled, looksBoosted, mode == .failed || mode == .needsPrivilege {
+        if enabled, daemonUp || looksBoosted, mode == .failed || mode == .needsPrivilege {
             mode = .hardwareBoost
             lastError = nil
         }
@@ -94,7 +102,7 @@ public actor FanBoostController {
                 isEnabled: true,
                 mode: .needsPrivilege,
                 statusText: "Waiting for access",
-                detailText: "Admin approval required to control fans",
+                detailText: "Admin approval required once to control fans",
                 rpm: rpm
             )
         case .failed:
@@ -118,7 +126,6 @@ public actor FanBoostController {
         } else {
             keepAliveTask?.cancel()
             keepAliveTask = nil
-            stopPrivilegedHold()
             await restoreAuto(privilegedFallback: true)
             enabled = false
             mode = .off
@@ -133,8 +140,8 @@ public actor FanBoostController {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(8))
                 guard let self, await self.enabled else { break }
-                // If the privileged hold is already re-applying as root, leave it alone.
-                if await self.privilegedHoldProcess?.isRunning == true { continue }
+                // Privileged daemon already re-applies while holding.
+                if FanDaemonClient.isAvailable() { continue }
                 await self.applyBoost(privilegedFallback: false)
             }
         }
@@ -146,20 +153,30 @@ public actor FanBoostController {
             mode = .hardwareBoost
             lastError = nil
             return
-        } catch SMCError.permissionDenied {
-            await handleWriteFailure(error: SMCError.permissionDenied, privilegedFallback: privilegedFallback)
         } catch {
             await handleWriteFailure(error: error, privilegedFallback: privilegedFallback)
         }
     }
 
     private func handleWriteFailure(error: Error, privilegedFallback: Bool) async {
-        // Unprivileged keep-alive cannot rewrite SMC keys. If boost already
-        // succeeded (or a privileged hold is running), keep showing success.
-        if !privilegedFallback {
-            if privilegedHoldProcess?.isRunning == true || mode == .hardwareBoost {
+        // Prefer the cached privileged daemon — no password if it's already up.
+        if FanDaemonClient.isAvailable() {
+            do {
+                try FanDaemonClient.send(FanDaemonProtocol.boost)
+                mode = .hardwareBoost
+                lastError = nil
                 return
+            } catch {
+                // Fall through and try (re)starting if allowed.
+                if !privilegedFallback {
+                    if mode == .hardwareBoost { return }
+                    mode = .needsPrivilege
+                    lastError = error.localizedDescription
+                    return
+                }
             }
+        } else if !privilegedFallback {
+            if mode == .hardwareBoost { return }
             mode = .needsPrivilege
             lastError = error.localizedDescription
             return
@@ -167,13 +184,14 @@ public actor FanBoostController {
 
         mode = .needsPrivilege
         do {
-            try await startPrivilegedHold()
+            try await ensurePrivilegedDaemon()
+            try FanDaemonClient.send(FanDaemonProtocol.boost)
             mode = .hardwareBoost
             lastError = nil
         } catch {
-            // One-shot boost as a last resort (still requires the same prompt).
+            // Fall back to a one-shot privileged hold if the daemon failed to detach.
             do {
-                try await runPrivilegedFanCLI(argument: "boost", waitUntilExit: true)
+                try await startPrivilegedHoldFallback()
                 mode = .hardwareBoost
                 lastError = nil
             } catch {
@@ -186,12 +204,22 @@ public actor FanBoostController {
     private func restoreAuto(privilegedFallback: Bool) async {
         do {
             try restoreInProcess()
-        } catch SMCError.permissionDenied where privilegedFallback {
-            try? await runPrivilegedFanCLI(argument: "auto", waitUntilExit: true)
+            return
         } catch {
-            if privilegedFallback {
-                try? await runPrivilegedFanCLI(argument: "auto", waitUntilExit: true)
-            }
+            // Keep going — restore via daemon when possible.
+        }
+
+        if FanDaemonClient.isAvailable() {
+            _ = try? FanDaemonClient.send(FanDaemonProtocol.auto)
+            return
+        }
+
+        guard privilegedFallback else { return }
+        do {
+            try await ensurePrivilegedDaemon()
+            try FanDaemonClient.send(FanDaemonProtocol.auto)
+        } catch {
+            try? await runPrivilegedFanCLI(argument: "auto")
         }
     }
 
@@ -216,13 +244,57 @@ public actor FanBoostController {
         try? smc.resetFanTestUnlock()
     }
 
-    private func startPrivilegedHold() async throws {
-        if privilegedHoldProcess?.isRunning == true { return }
+    /// Start the root daemon once (admin password). Stays up so later toggles are free.
+    private func ensurePrivilegedDaemon() async throws {
+        if FanDaemonClient.isAvailable() { return }
 
-        stopPrivilegedHold()
+        let helper = try resolveFanCLIURL()
+        let socketURL = FanDaemonProtocol.socketURL()
+        let socketPath = socketURL.path
+        try? FileManager.default.removeItem(at: socketURL)
+
+        let escapedHelper = helper.path.replacingOccurrences(of: "'", with: "'\\''")
+        let escapedSocket = socketPath.replacingOccurrences(of: "'", with: "'\\''")
+        let uid = getuid()
+        let logPath = "/tmp/tilde-fan-daemon-\(uid).log"
+        // Important: do NOT use `nohup` here — under `do shell script` it fails with
+        // "can't detach from console" and the daemon never starts. Background with `&`
+        // inside a subshell so AppleScript can return while the daemon keeps running.
+        let script =
+            "do shell script \"( '\(escapedHelper)' daemon --socket '\(escapedSocket)' --uid \(uid) " +
+            ">>'\(logPath)' 2>&1 & )\" with administrator privileges"
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", script]
+        let stderr = Pipe()
+        process.standardError = stderr
+        try process.run()
+        process.waitUntilExit()
+        daemonStartProcess = process
+
+        guard process.terminationStatus == 0 else {
+            let message = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            throw FanCLIError.privilegedFailed(message ?? "Admin authorization failed")
+        }
+
+        for _ in 0..<80 {
+            try await Task.sleep(for: .milliseconds(100))
+            if FanDaemonClient.isAvailable(socketPath: socketPath) {
+                return
+            }
+        }
+        let log = (try? String(contentsOfFile: logPath, encoding: .utf8)) ?? ""
+        throw FanCLIError.privilegedFailed(
+            log.isEmpty ? "Fan daemon failed to start" : log.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+    }
+
+    /// Legacy fallback: keep a privileged `hold` process alive for this boost session.
+    private func startPrivilegedHoldFallback() async throws {
         let helper = try resolveFanCLIURL()
         let escaped = helper.path.replacingOccurrences(of: "'", with: "'\\''")
-        // One admin prompt; `hold` keeps re-applying boost until we terminate it.
         let script = "do shell script \"'\(escaped)' hold\" with administrator privileges"
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
@@ -230,26 +302,20 @@ public actor FanBoostController {
         let stderr = Pipe()
         process.standardError = stderr
         try process.run()
-        privilegedHoldProcess = process
+        daemonStartProcess = process
 
-        // Password dialog can take a while. Fail only if the process exits.
-        // Succeed early once fan targets look boosted.
-        for _ in 0..<300 { // up to ~120s
-            try await Task.sleep(for: .milliseconds(400))
+        for _ in 0..<100 {
+            try await Task.sleep(for: .milliseconds(200))
             if !process.isRunning {
                 let message = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
                     .trimmingCharacters(in: .whitespacesAndNewlines)
-                privilegedHoldProcess = nil
                 throw FanCLIError.privilegedFailed(message ?? "Admin authorization failed")
             }
-            if let fans = try? SMC().readFans(), fans.contains(where: isBoosted(_:)) {
+            if let fans = try? SMC().readFans(), fans.contains(where: isBoosted) {
                 return
             }
         }
-
-        // Still alive after the wait window — treat hold as active.
         if process.isRunning { return }
-        privilegedHoldProcess = nil
         throw FanCLIError.privilegedFailed("Admin authorization failed")
     }
 
@@ -258,14 +324,7 @@ public actor FanBoostController {
         return fan.targetRPM >= floor || fan.actualRPM >= floor
     }
 
-    private func stopPrivilegedHold() {
-        guard let process = privilegedHoldProcess else { return }
-        process.terminate()
-        process.waitUntilExit()
-        privilegedHoldProcess = nil
-    }
-
-    private func runPrivilegedFanCLI(argument: String, waitUntilExit: Bool) async throws {
+    private func runPrivilegedFanCLI(argument: String) async throws {
         let helper = try resolveFanCLIURL()
         let escaped = helper.path.replacingOccurrences(of: "'", with: "'\\''")
         let script = "do shell script \"'\(escaped)' \(argument)\" with administrator privileges"
@@ -275,13 +334,11 @@ public actor FanBoostController {
         let stderr = Pipe()
         process.standardError = stderr
         try process.run()
-        if waitUntilExit {
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else {
-                let message = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                throw FanCLIError.privilegedFailed(message ?? "Admin authorization failed")
-            }
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            let message = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            throw FanCLIError.privilegedFailed(message ?? "Admin authorization failed")
         }
     }
 

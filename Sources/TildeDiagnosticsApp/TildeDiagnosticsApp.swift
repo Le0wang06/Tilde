@@ -206,6 +206,23 @@ final class DiagnosticViewModel: ObservableObject {
 
     func setFanBoostEnabled(_ enabled: Bool) {
         let thermal = report?.system.thermalState ?? .unavailable
+        if enabled {
+            fanBoost = FanBoostController.Snapshot(
+                isEnabled: true,
+                mode: .needsPrivilege,
+                statusText: "Waiting for access",
+                detailText: "Approve admin once — then toggles stay unlocked",
+                rpm: fanBoost.rpm
+            )
+        } else {
+            fanBoost = FanBoostController.Snapshot(
+                isEnabled: false,
+                mode: .off,
+                statusText: "Off",
+                detailText: "Stopping boost…",
+                rpm: fanBoost.rpm
+            )
+        }
         Task {
             let snapshot = await fanBoostController.setEnabled(enabled, thermalState: thermal)
             await MainActor.run { self.fanBoost = snapshot }
