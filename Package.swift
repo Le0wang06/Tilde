@@ -7,6 +7,7 @@ let package = Package(
     platforms: [.macOS(.v14)],
     products: [
         .executable(name: "TildeDiagnostics", targets: ["TildeDiagnosticsApp"]),
+        .executable(name: "tilde-probe", targets: ["TildeProbe"]),
         .library(name: "TildeCore", targets: ["TildeCore"]),
     ],
     targets: [
@@ -16,6 +17,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "TildeDiagnosticsApp",
+            dependencies: ["TildeCore"]
+        ),
+        .executableTarget(
+            name: "TildeProbe",
             dependencies: ["TildeCore"]
         ),
         .testTarget(
