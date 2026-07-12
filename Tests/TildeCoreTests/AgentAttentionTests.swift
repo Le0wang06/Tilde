@@ -48,6 +48,23 @@ import Testing
     #expect(snapshot.workingCount == 1)
 }
 
+@Test func displayItemsIncludeIdleAgentsWithoutMarkingThemForAttention() {
+    let snapshot = AgentAttentionSnapshot(
+        agents: [
+            makeAgent(id: "unknown", state: .unknown, project: "Unknown"),
+            makeAgent(id: "idle", state: .idle, project: "Tilde"),
+            makeAgent(id: "working", state: .working, project: "Beta"),
+            makeAgent(id: "done", state: .done, project: "Alpha"),
+            makeAgent(id: "blocked", state: .blocked, project: "Gamma"),
+        ],
+        providerAvailable: true
+    )
+
+    #expect(snapshot.displayItems.map(\.id) == ["blocked", "done", "working", "idle", "unknown"])
+    #expect(snapshot.displayItems.contains { $0.state == .idle })
+    #expect(snapshot.attentionCount == 2)
+}
+
 @Test func attentionMonitorSuppressesInitialAlertsAndReportsTransitions() async {
     let queue = AttentionSnapshotQueue([
         AgentAttentionSnapshot(
