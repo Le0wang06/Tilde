@@ -434,8 +434,6 @@ final class DiagnosticViewModel: ObservableObject {
         let attentionCount = attention.attentionCount
         if attentionCount > 0 {
             title = "~ \(attentionCount) need\(attentionCount == 1 ? "s" : "") you · Cx \(cx)"
-        } else if attention.workingCount > 0 {
-            title += " · \(attention.workingCount) working"
         }
         if build.phase == .running {
             title += " · ⚒"
