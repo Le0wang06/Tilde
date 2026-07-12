@@ -137,6 +137,7 @@ final class DiagnosticViewModel: ObservableObject {
     private let fanBoostController = FanBoostController()
     private var historyBuffer = LiveMetricHistory()
     private var subscriptionTask: Task<Void, Never>?
+    private var speedWriteTask: Task<Void, Never>?
     private let menuBarPresentationID = UUID()
 
     var menuBarSymbol: String {
@@ -158,6 +159,11 @@ final class DiagnosticViewModel: ObservableObject {
         // the panel / window are closed.
         Task {
             await liveMonitoring.setPresentation(menuBarPresentationID, isActive: true)
+            // If a previous session left fans forced on, release them.
+            if !fanBoost.isEnabled {
+                await fanBoostController.forceReleaseFans()
+                await MainActor.run { self.fanBoost = .idle }
+            }
         }
         subscriptionTask = Task { [weak self] in
             guard let self else { return }
@@ -206,8 +212,48 @@ final class DiagnosticViewModel: ObservableObject {
 
     func setFanBoostEnabled(_ enabled: Bool) {
         let thermal = report?.system.thermalState ?? .unavailable
+        let speed = fanBoost.speed
+        if enabled {
+            fanBoost = FanBoostController.Snapshot(
+                isEnabled: true,
+                mode: .starting,
+                statusText: "Starting…",
+                detailText: "0 RPM · spinning fans up to \(Int((speed * 100).rounded()))%",
+                rpm: 0,
+                speed: speed
+            )
+        } else {
+            fanBoost = FanBoostController.Snapshot(
+                isEnabled: false,
+                mode: .off,
+                statusText: "Off",
+                detailText: "Drag the bar, then turn on",
+                rpm: 0,
+                speed: speed
+            )
+        }
         Task {
             let snapshot = await fanBoostController.setEnabled(enabled, thermalState: thermal)
+            await MainActor.run { self.fanBoost = snapshot }
+        }
+    }
+
+    func setFanBoostSpeed(_ speed: Double) {
+        let thermal = report?.system.thermalState ?? .unavailable
+        // Snappy local update while dragging.
+        fanBoost = FanBoostController.Snapshot(
+            isEnabled: fanBoost.isEnabled,
+            mode: fanBoost.mode,
+            statusText: fanBoost.statusText,
+            detailText: fanBoost.detailText,
+            rpm: fanBoost.rpm,
+            speed: speed
+        )
+        speedWriteTask?.cancel()
+        speedWriteTask = Task {
+            try? await Task.sleep(for: .milliseconds(140))
+            guard !Task.isCancelled else { return }
+            let snapshot = await fanBoostController.setSpeed(speed, thermalState: thermal)
             await MainActor.run { self.fanBoost = snapshot }
         }
     }
@@ -803,16 +849,17 @@ struct MenuBarPanel: View {
     }
 
     private var fanCard: some View {
-        let isOn = model.isFanBoostEnabled
+        let isActive = model.fanBoost.isActivelyBoosting
+        let isPending = model.fanBoost.isPending
         return ControlCenterCard {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 6) {
                     Image(systemName: "fan")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(isOn ? Color.green : Color.secondary)
+                        .foregroundStyle(isActive ? Color.green : Color.secondary)
                     Text("FAN")
                         .font(.caption.weight(.bold))
-                        .foregroundStyle(isOn ? Color.green : Color.secondary)
+                        .foregroundStyle(isActive ? Color.green : Color.secondary)
                     Spacer(minLength: 4)
                     Toggle("", isOn: Binding(
                         get: { model.isFanBoostEnabled },
@@ -820,15 +867,48 @@ struct MenuBarPanel: View {
                     ))
                     .toggleStyle(FanBoostToggleStyle())
                     .labelsHidden()
+                    .disabled(isPending)
                     .accessibilityLabel("Fan Boost")
                 }
 
-                FanWindAnimationView(isRunning: isOn)
+                FanWindAnimationView(isRunning: isActive)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Min")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text("\(model.fanBoost.speedPercent)%")
+                            .font(.caption.weight(.bold).monospacedDigit())
+                            .foregroundStyle(isActive ? Color.green : Color.primary)
+                        Spacer()
+                        Text("Max")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(
+                        value: Binding(
+                            get: { model.fanBoost.speed },
+                            set: { model.setFanBoostSpeed($0) }
+                        ),
+                        in: 0.15...1.0
+                    )
+                    .tint(isActive ? Color(red: 0.22, green: 0.78, blue: 0.38) : Color.secondary.opacity(0.7))
+                    .disabled(isPending)
+                    .controlSize(.small)
+                }
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(model.fanBoost.statusText)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(isOn ? Color.green : Color.primary)
+                    HStack(spacing: 6) {
+                        if isPending {
+                            ProgressView()
+                                .controlSize(.mini)
+                        }
+                        Text(model.fanBoost.statusText)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(isActive ? Color.green : Color.primary)
+                    }
                     Text(model.fanBoost.detailText)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
