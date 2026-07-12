@@ -80,8 +80,9 @@ public actor ProjectContextMonitor {
 
     public init() {}
 
-    public func snapshot() async -> ProjectContextSnapshot {
-        guard let root = Self.resolveProjectRoot() else {
+    public func snapshot(preferredRoot: String? = nil) async -> ProjectContextSnapshot {
+        let preferred = preferredRoot.flatMap(Self.gitRoot(for:))
+        guard let root = preferred ?? Self.resolveProjectRoot() else {
             return .empty
         }
 
@@ -164,13 +165,15 @@ public actor ProjectContextMonitor {
         let pipe = Pipe()
         proc.standardOutput = pipe
         proc.standardError = Pipe()
+        let data: Data
         do {
             try proc.run()
+            data = pipe.fileHandleForReading.readDataToEndOfFile()
             proc.waitUntilExit()
         } catch {
             return []
         }
-        let text = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let text = String(data: data, encoding: .utf8) ?? ""
         var pids: [Int32] = []
         for line in text.split(separator: "\n") {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -192,13 +195,14 @@ public actor ProjectContextMonitor {
         let pipe = Pipe()
         proc.standardOutput = pipe
         proc.standardError = Pipe()
+        let data: Data
         do {
             try proc.run()
+            data = pipe.fileHandleForReading.readDataToEndOfFile()
             proc.waitUntilExit()
         } catch {
             return nil
         }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
         guard let text = String(data: data, encoding: .utf8) else { return nil }
         for line in text.split(separator: "\n") where line.hasPrefix("n") {
             let path = String(line.dropFirst())
@@ -253,14 +257,16 @@ public actor ProjectContextMonitor {
         let err = Pipe()
         proc.standardOutput = out
         proc.standardError = err
+        let data: Data
         do {
             try proc.run()
+            data = out.fileHandleForReading.readDataToEndOfFile()
             proc.waitUntilExit()
         } catch {
             return nil
         }
         guard proc.terminationStatus == 0 else { return nil }
-        return String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)
+        return String(data: data, encoding: .utf8)
     }
 
     private static func fetchCIStatus(in root: String) async -> (status: ProjectCIStatus, summary: String?) {
@@ -280,14 +286,15 @@ public actor ProjectContextMonitor {
         let out = Pipe()
         proc.standardOutput = out
         proc.standardError = Pipe()
+        let data: Data
         do {
             try proc.run()
+            data = out.fileHandleForReading.readDataToEndOfFile()
             proc.waitUntilExit()
         } catch {
             return (.unknown, nil)
         }
         guard proc.terminationStatus == 0 else { return (.unknown, nil) }
-        let data = out.fileHandleForReading.readDataToEndOfFile()
         guard let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
               let first = rows.first else {
             return (.unknown, "No recent CI")

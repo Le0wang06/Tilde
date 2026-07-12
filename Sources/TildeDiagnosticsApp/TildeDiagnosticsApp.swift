@@ -188,22 +188,39 @@ final class DiagnosticViewModel: ObservableObject {
     @Published private(set) var projectContext = ProjectContextSnapshot.empty
     @Published private(set) var focusMode: FocusMode = .off
     @Published private(set) var todaySummary = SessionDiaryTodaySummary.empty
+    @Published private(set) var agentAttention = AgentAttentionSnapshot.unavailable
+    @Published private(set) var trustPacket = TrustPacketSnapshot.unavailable
+    @Published private(set) var recoveryCapsule: RecoveryCapsule?
     private let liveMonitoring = LiveMonitoringService()
     private let fanBoostController = FanBoostController()
     private let buildPulseMonitor = BuildPulseMonitor()
     private let projectContextMonitor = ProjectContextMonitor()
     private let slowdownNotifier = SlowdownNotifier()
     private let sessionDiary = SessionDiaryStore()
+    private let herdrAgentProvider: HerdrAgentProvider
+    private let agentAttentionMonitor: AgentAttentionMonitor
+    private let agentAttentionNotifier = AgentAttentionNotifier()
+    private let trustPacketProvider = TrustPacketProvider()
+    private let recoveryCapsuleStore = RecoveryCapsuleStore()
     private var historyBuffer = LiveMetricHistory()
     private var subscriptionTask: Task<Void, Never>?
     private var buildPulseTask: Task<Void, Never>?
     private var projectContextTask: Task<Void, Never>?
     private var speedWriteTask: Task<Void, Never>?
+    private var agentAttentionTask: Task<Void, Never>?
     private var didAskNotificationAuth = false
     private var didRecordAppStart = false
     private var lastLoggedBuildPhase: BuildPulsePhase = .idle
     private var lastLoggedSlowdown: SlowdownSeverity = .none
     private let menuBarPresentationID = UUID()
+
+    init() {
+        let provider = HerdrAgentProvider()
+        herdrAgentProvider = provider
+        agentAttentionMonitor = AgentAttentionMonitor {
+            await provider.snapshot()
+        }
+    }
 
     var menuBarSymbol: String {
         if runState == .running { return "ellipsis.circle" }
@@ -271,8 +288,22 @@ final class DiagnosticViewModel: ObservableObject {
         projectContextTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { break }
-                let snapshot = await self.projectContextMonitor.snapshot()
+                let preferredRoot = self.agentAttention.agents.first(where: { $0.focused })?.projectRoot
+                    ?? self.agentAttention.agents.first(where: { $0.state == .working })?.projectRoot
+                let snapshot = await self.projectContextMonitor.snapshot(preferredRoot: preferredRoot)
                 self.projectContext = snapshot
+                self.trustPacket = await self.trustPacketProvider.snapshot(
+                    rootPath: snapshot.rootPath,
+                    build: self.buildPulse,
+                    ciStatus: snapshot.ciStatus,
+                    behind: snapshot.behind
+                )
+                self.recoveryCapsule = await self.recoveryCapsuleStore.update(
+                    project: snapshot,
+                    attention: self.agentAttention,
+                    trust: self.trustPacket,
+                    build: self.buildPulse
+                )
                 if let report = self.report {
                     self.publishMenuBarTitle(
                         codex: report.codex,
@@ -284,6 +315,33 @@ final class DiagnosticViewModel: ObservableObject {
                     )
                 }
                 try? await Task.sleep(for: .seconds(5))
+            }
+        }
+        agentAttentionTask?.cancel()
+        agentAttentionTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { break }
+                let refresh = await self.agentAttentionMonitor.refresh()
+                self.agentAttention = refresh.snapshot
+                self.agentAttentionNotifier.post(refresh.events)
+                for event in refresh.events {
+                    self.recordDiary(.init(
+                        kind: event.kind == .needsInput ? .agentNeedsInput : .agentCompleted,
+                        summary: "\(event.agent.projectName) · \(event.agent.state.label)",
+                        detail: "\(event.agent.agent) in \(event.agent.cwd)"
+                    ))
+                }
+                if let report = self.report {
+                    self.publishMenuBarTitle(
+                        codex: report.codex,
+                        cursor: report.cursor,
+                        build: self.buildPulse,
+                        slowdown: self.slowdown,
+                        project: self.projectContext,
+                        focus: self.focusMode
+                    )
+                }
+                try? await Task.sleep(for: .seconds(2))
             }
         }
     }
@@ -338,7 +396,8 @@ final class DiagnosticViewModel: ObservableObject {
             build: build,
             slowdown: slowdown,
             project: project,
-            focus: focus
+            focus: focus,
+            attention: agentAttention
         )
         MenuBarStatusItemController.shared.updateTitle(menuBarTitle)
         NotificationCenter.default.post(
@@ -354,7 +413,8 @@ final class DiagnosticViewModel: ObservableObject {
         build: BuildPulseSnapshot,
         slowdown: SlowdownAdvice,
         project: ProjectContextSnapshot,
-        focus: FocusMode
+        focus: FocusMode,
+        attention: AgentAttentionSnapshot
     ) -> String {
         let cx: String
         if case .available(let snapshot) = codex, let remaining = snapshot.primaryLimit?.remainingPercent {
@@ -371,6 +431,12 @@ final class DiagnosticViewModel: ObservableObject {
         }
 
         var title = "~ Cx \(cx) · Cr \(cr)"
+        let attentionCount = attention.attentionCount
+        if attentionCount > 0 {
+            title = "~ \(attentionCount) need\(attentionCount == 1 ? "s" : "") you · Cx \(cx)"
+        } else if attention.workingCount > 0 {
+            title += " · \(attention.workingCount) working"
+        }
         if build.phase == .running {
             title += " · ⚒"
         } else if build.phase == .finished {
@@ -540,6 +606,25 @@ final class DiagnosticViewModel: ObservableObject {
         }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(lines.joined(separator: "\n"), forType: .string)
+    }
+
+    func focusAgent(_ agent: AgentAttentionItem) {
+        Task {
+            guard await herdrAgentProvider.focusAgent(terminalID: agent.terminalID) else { return }
+            await MainActor.run {
+                let terminalBundleIDs = [
+                    "com.mitchellh.ghostty",
+                    "com.googlecode.iterm2",
+                    "com.apple.Terminal",
+                ]
+                if let app = NSWorkspace.shared.runningApplications.first(where: {
+                    guard let bundleID = $0.bundleIdentifier else { return false }
+                    return terminalBundleIDs.contains(bundleID)
+                }) {
+                    app.activate()
+                }
+            }
+        }
     }
 
     func setPresentation(_ id: UUID, isActive: Bool) {
@@ -990,6 +1075,9 @@ struct MenuBarPanel: View {
     @ViewBuilder
     private func metricGrid(_ report: DiagnosticReport) -> some View {
         VStack(spacing: 8) {
+            if model.agentAttention.providerAvailable, !model.agentAttention.agents.isEmpty {
+                attentionCard
+            }
             HStack(alignment: .top, spacing: 8) {
                 cpuCard(report)
                 memoryCard(report)
@@ -1004,6 +1092,74 @@ struct MenuBarPanel: View {
             agentCard(report)
             contextStrip
             focusStrip
+        }
+    }
+
+    private var attentionCard: some View {
+        let attention = model.agentAttention.attentionItems
+        let visible = attention.isEmpty
+            ? Array(model.agentAttention.agents.filter { $0.state == .working }.prefix(2))
+            : Array(attention.prefix(3))
+
+        return ControlCenterCard {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Image(systemName: attention.isEmpty ? "sparkles" : "exclamationmark.bubble.fill")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(attention.isEmpty ? Color.secondary : Color.orange)
+                    Text(attention.isEmpty ? "AGENTS · WORKING" : "AGENTS · NEED YOU")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("\(model.agentAttention.agents.count)")
+                        .font(.caption2.weight(.bold).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+
+                ForEach(visible) { agent in
+                    Button {
+                        model.focusAgent(agent)
+                    } label: {
+                        HStack(spacing: 7) {
+                            Circle()
+                                .fill(agentStateColor(agent.state))
+                                .frame(width: 7, height: 7)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("\(agent.projectName) · \(agent.agent.capitalized)")
+                                    .font(.caption.weight(.semibold))
+                                    .lineLimit(1)
+                                Text(agent.branch.map { "\(agent.state.label) · \($0)" } ?? agent.state.label)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            Spacer(minLength: 4)
+                            Image(systemName: "arrow.up.forward.app")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Focus this agent in Herdr")
+                }
+
+                if visible.isEmpty {
+                    Text("All agents are idle")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private func agentStateColor(_ state: AgentAttentionState) -> Color {
+        switch state {
+        case .blocked: return .orange
+        case .done: return .green
+        case .working: return .blue
+        case .idle: return .secondary
+        case .unknown: return .gray
         }
     }
 
@@ -1200,12 +1356,44 @@ struct MenuBarPanel: View {
                     tint: .secondary
                 )
                 compactRow(
+                    symbol: trustSymbol,
+                    label: "Trust",
+                    value: model.trustPacket.summary,
+                    tint: trustTint
+                )
+                compactRow(
                     symbol: "book.closed",
                     label: "Today",
                     value: model.todaySummary.headline,
                     tint: .secondary
                 )
+                if let capsule = model.recoveryCapsule {
+                    compactRow(
+                        symbol: "arrow.uturn.backward.circle",
+                        label: "Resume",
+                        value: capsule.headline,
+                        tint: capsule.attentionCount > 0 ? .orange : .secondary
+                    )
+                }
             }
+        }
+    }
+
+    private var trustSymbol: String {
+        switch model.trustPacket.state {
+        case .unavailable: return "checkmark.shield"
+        case .verifying: return "clock.badge.checkmark"
+        case .needsVerification: return "exclamationmark.shield"
+        case .ready: return "checkmark.shield.fill"
+        }
+    }
+
+    private var trustTint: Color {
+        switch model.trustPacket.state {
+        case .unavailable: return .secondary
+        case .verifying: return .blue
+        case .needsVerification: return .orange
+        case .ready: return .green
         }
     }
 
@@ -1356,6 +1544,9 @@ struct MenuBarPanel: View {
 
     private var statusText: String {
         if model.runState == .running { return "Monitoring" }
+        if model.agentAttention.attentionCount > 0 {
+            return "\(model.agentAttention.attentionCount) agent\(model.agentAttention.attentionCount == 1 ? "" : "s") need you"
+        }
         guard let report = model.report else { return "Starting" }
         if report.system.thermalState == .critical { return "Thermal Pressure" }
         if case .available(let memory) = report.system.memory {
@@ -1366,6 +1557,7 @@ struct MenuBarPanel: View {
     }
 
     private var panelStatusColor: Color {
+        if model.agentAttention.attentionCount > 0 { return .orange }
         guard let report = model.report else { return .secondary }
         if report.system.thermalState == .critical { return .red }
         if case .available(let memory) = report.system.memory {

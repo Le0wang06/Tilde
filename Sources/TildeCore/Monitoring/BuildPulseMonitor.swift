@@ -170,13 +170,14 @@ public actor BuildPulseMonitor {
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = Pipe()
+        let data: Data
         do {
             try process.run()
+            data = pipe.fileHandleForReading.readDataToEndOfFile()
             process.waitUntilExit()
         } catch {
             return []
         }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
         guard let text = String(data: data, encoding: .utf8) else { return [] }
 
         var matches: [Match] = []
