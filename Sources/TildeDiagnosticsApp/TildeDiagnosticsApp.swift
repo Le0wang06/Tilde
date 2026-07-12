@@ -1008,42 +1008,70 @@ struct MenuBarPanel: View {
     }
 
     private func cpuCard(_ report: DiagnosticReport) -> some View {
-        ControlCenterCard {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 4) {
-                    Text("CPU")
-                        .font(.caption2.weight(.bold))
+        let cpuPercent: Double? = {
+            if case .available(let cpu) = report.system.cpu { return cpu.usagePercent }
+            return nil
+        }()
+        let tint = MetricColor.utilization(cpuPercent ?? 0)
+
+        return ControlCenterCard {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("CPU")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.secondary)
+
+                if let cpuPercent {
+                    Text(percent(cpuPercent))
+                        .font(.title3.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(.primary)
+
+                    CompactCPUSparkline(samples: model.history, tint: tint)
+                        .frame(height: 28)
+                        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+
+                    ColorBar(fraction: cpuPercent / 100, color: tint)
+                } else {
+                    Text("—")
+                        .font(.title3.weight(.semibold))
                         .foregroundStyle(.secondary)
-                    Spacer()
-                    Text(cpuPercentText(report))
-                        .font(.caption.weight(.semibold).monospacedDigit())
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .fill(Color.primary.opacity(0.04))
+                        .frame(height: 28)
+                    ColorBar(fraction: 0, color: .secondary)
                 }
-                LiveResourceChart(samples: model.history, compact: true)
-                    .frame(height: 36)
             }
         }
     }
 
     private func memoryCard(_ report: DiagnosticReport) -> some View {
         ControlCenterCard {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text("RAM")
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(.secondary)
                 if case .available(let memory) = report.system.memory, memory.totalBytes > 0 {
                     let usage = Double(memory.usedBytes) / Double(memory.totalBytes)
+                    let tint = memory.pressure == .unavailable
+                        ? MetricColor.utilization(usage * 100)
+                        : MetricColor.memoryPressure(memory.pressure)
+
                     Text(percent(usage * 100))
                         .font(.title3.weight(.semibold).monospacedDigit())
-                    ColorBar(
-                        fraction: usage,
-                        color: memory.pressure == .unavailable
-                            ? .blue
-                            : MetricColor.memoryPressure(memory.pressure)
-                    )
+
+                    Text("\(bytes(memory.usedBytes)) / \(bytes(memory.totalBytes))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                        .frame(height: 28, alignment: .center)
+
+                    ColorBar(fraction: usage, color: tint)
                 } else {
                     Text("—")
                         .font(.title3.weight(.semibold))
                         .foregroundStyle(.secondary)
+                    Color.clear.frame(height: 28)
+                    ColorBar(fraction: 0, color: .secondary)
                 }
             }
         }
@@ -1344,13 +1372,6 @@ struct MenuBarPanel: View {
             return MetricColor.memoryPressure(memory.pressure)
         }
         return .green
-    }
-
-    private func cpuPercentText(_ report: DiagnosticReport) -> String {
-        if case .available(let cpu) = report.system.cpu {
-            return percent(cpu.usagePercent)
-        }
-        return "—"
     }
 
     private func percent(_ value: Double) -> String {
