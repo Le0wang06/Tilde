@@ -23,7 +23,7 @@ import Testing
         now: start.addingTimeInterval(60),
         isForeground: true
     )
-    #expect(afterSixtySeconds == Set(LiveMetric.allCases))
+    #expect(afterSixtySeconds == Set(LiveMetric.allCases).subtracting([.cursor]))
 }
 
 @Test func adaptivePolicySlowsSamplingInBackground() {

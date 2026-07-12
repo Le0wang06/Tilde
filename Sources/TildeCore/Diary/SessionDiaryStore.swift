@@ -6,6 +6,8 @@ public enum SessionDiaryEventKind: String, Codable, Sendable {
     case buildStarted
     case buildFinished
     case slowdown
+    case agentNeedsInput
+    case agentCompleted
     case note
 }
 
