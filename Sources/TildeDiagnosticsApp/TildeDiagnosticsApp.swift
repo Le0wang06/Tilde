@@ -187,17 +187,22 @@ final class DiagnosticViewModel: ObservableObject {
     @Published private(set) var slowdown = SlowdownAdvice.none
     @Published private(set) var projectContext = ProjectContextSnapshot.empty
     @Published private(set) var focusMode: FocusMode = .off
+    @Published private(set) var todaySummary = SessionDiaryTodaySummary.empty
     private let liveMonitoring = LiveMonitoringService()
     private let fanBoostController = FanBoostController()
     private let buildPulseMonitor = BuildPulseMonitor()
     private let projectContextMonitor = ProjectContextMonitor()
     private let slowdownNotifier = SlowdownNotifier()
+    private let sessionDiary = SessionDiaryStore()
     private var historyBuffer = LiveMetricHistory()
     private var subscriptionTask: Task<Void, Never>?
     private var buildPulseTask: Task<Void, Never>?
     private var projectContextTask: Task<Void, Never>?
     private var speedWriteTask: Task<Void, Never>?
     private var didAskNotificationAuth = false
+    private var didRecordAppStart = false
+    private var lastLoggedBuildPhase: BuildPulsePhase = .idle
+    private var lastLoggedSlowdown: SlowdownSeverity = .none
     private let menuBarPresentationID = UUID()
 
     var menuBarSymbol: String {
@@ -225,6 +230,15 @@ final class DiagnosticViewModel: ObservableObject {
                 await MainActor.run { self.fanBoost = .idle }
             }
         }
+        if !didRecordAppStart {
+            didRecordAppStart = true
+            recordDiary(.init(kind: .appStarted, summary: "Tilde started"))
+        } else {
+            Task {
+                let summary = await sessionDiary.todaySummary()
+                await MainActor.run { self.todaySummary = summary }
+            }
+        }
         subscriptionTask = Task { [weak self] in
             guard let self else { return }
             let reports = await liveMonitoring.reports()
@@ -238,6 +252,7 @@ final class DiagnosticViewModel: ObservableObject {
             while !Task.isCancelled {
                 guard let self else { break }
                 let snapshot = await self.buildPulseMonitor.snapshot()
+                self.noteBuildPulseTransition(snapshot)
                 self.buildPulse = snapshot
                 if let report = self.report {
                     self.publishMenuBarTitle(
@@ -278,6 +293,14 @@ final class DiagnosticViewModel: ObservableObject {
         historyBuffer.append(LiveMetricSample(snapshot: report.system))
         history = historyBuffer.samples
         let advice = SlowdownAdvisor.advice(from: report.system)
+        if advice.severity != lastLoggedSlowdown, advice.severity != .none {
+            recordDiary(.init(
+                kind: .slowdown,
+                summary: advice.title,
+                detail: advice.detail
+            ))
+        }
+        lastLoggedSlowdown = advice.severity
         slowdown = advice
         if !didAskNotificationAuth, advice.severity != .none {
             didAskNotificationAuth = true
@@ -373,6 +396,11 @@ final class DiagnosticViewModel: ObservableObject {
 
     func applyFocusMode(_ mode: FocusMode) {
         focusMode = mode
+        recordDiary(.init(
+            kind: .focusChanged,
+            summary: "Focus · \(mode.title)",
+            detail: mode.detail
+        ))
         if let report {
             publishMenuBarTitle(
                 codex: report.codex,
@@ -394,6 +422,35 @@ final class DiagnosticViewModel: ObservableObject {
             for app in NSWorkspace.shared.runningApplications where app.bundleIdentifier == bundleID {
                 app.terminate()
             }
+        }
+    }
+
+    private func noteBuildPulseTransition(_ snapshot: BuildPulseSnapshot) {
+        guard snapshot.phase != lastLoggedBuildPhase else { return }
+        defer { lastLoggedBuildPhase = snapshot.phase }
+        switch snapshot.phase {
+        case .running:
+            recordDiary(.init(
+                kind: .buildStarted,
+                summary: "\(snapshot.kind?.label ?? "Build") started",
+                detail: snapshot.commandSummary
+            ))
+        case .finished:
+            recordDiary(.init(
+                kind: .buildFinished,
+                summary: snapshot.statusText,
+                detail: snapshot.commandSummary
+            ))
+        case .idle:
+            break
+        }
+    }
+
+    private func recordDiary(_ event: SessionDiaryEvent) {
+        Task {
+            await sessionDiary.record(event)
+            let summary = await sessionDiary.todaySummary()
+            await MainActor.run { self.todaySummary = summary }
         }
     }
 
@@ -934,6 +991,7 @@ struct MenuBarPanel: View {
             buildPulseCard
             projectCard
             focusModeCard
+            todayCard
         }
     }
 
@@ -1204,6 +1262,28 @@ struct MenuBarPanel: View {
                     }
                 }
                 Text(model.focusMode.detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+    }
+
+    private var todayCard: some View {
+        let today = model.todaySummary
+        return ControlCenterCard {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "book.closed")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text("TODAY")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                }
+                Text(today.headline)
+                    .font(.caption.weight(.semibold))
+                Text(today.detailText)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
