@@ -133,10 +133,13 @@ final class DiagnosticViewModel: ObservableObject {
     /// Compact Codex remaining % shown in the macOS menu bar title.
     @Published private(set) var menuBarTitle: String = "~ …"
     @Published private(set) var fanBoost: FanBoostController.Snapshot = .idle
+    @Published private(set) var buildPulse = BuildPulseSnapshot()
     private let liveMonitoring = LiveMonitoringService()
     private let fanBoostController = FanBoostController()
+    private let buildPulseMonitor = BuildPulseMonitor()
     private var historyBuffer = LiveMetricHistory()
     private var subscriptionTask: Task<Void, Never>?
+    private var buildPulseTask: Task<Void, Never>?
     private var speedWriteTask: Task<Void, Never>?
     private let menuBarPresentationID = UUID()
 
@@ -173,19 +176,25 @@ final class DiagnosticViewModel: ObservableObject {
                 self.apply(report: report)
             }
         }
+        buildPulseTask?.cancel()
+        buildPulseTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { break }
+                let snapshot = await self.buildPulseMonitor.snapshot()
+                self.buildPulse = snapshot
+                if let report = self.report {
+                    self.publishMenuBarTitle(codex: report.codex, cursor: report.cursor, build: snapshot)
+                }
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
     }
 
     private func apply(report: DiagnosticReport) {
         self.report = report
         historyBuffer.append(LiveMetricSample(snapshot: report.system))
         history = historyBuffer.samples
-        menuBarTitle = Self.makeMenuBarTitle(from: report.codex, cursor: report.cursor)
-        MenuBarStatusItemController.shared.updateTitle(menuBarTitle)
-        NotificationCenter.default.post(
-            name: .tildeMenuBarTitleDidChange,
-            object: nil,
-            userInfo: ["title": menuBarTitle]
-        )
+        publishMenuBarTitle(codex: report.codex, cursor: report.cursor, build: buildPulse)
         if fanBoost.isEnabled {
             Task {
                 let snapshot = await fanBoostController.currentSnapshot(thermalState: report.system.thermalState)
@@ -195,9 +204,24 @@ final class DiagnosticViewModel: ObservableObject {
         runState.apply(.finish)
     }
 
+    private func publishMenuBarTitle(
+        codex: Availability<CodexDiagnosticSnapshot>,
+        cursor: Availability<CursorUsageSnapshot>,
+        build: BuildPulseSnapshot
+    ) {
+        menuBarTitle = Self.makeMenuBarTitle(from: codex, cursor: cursor, build: build)
+        MenuBarStatusItemController.shared.updateTitle(menuBarTitle)
+        NotificationCenter.default.post(
+            name: .tildeMenuBarTitleDidChange,
+            object: nil,
+            userInfo: ["title": menuBarTitle]
+        )
+    }
+
     private static func makeMenuBarTitle(
         from codex: Availability<CodexDiagnosticSnapshot>,
-        cursor: Availability<CursorUsageSnapshot>
+        cursor: Availability<CursorUsageSnapshot>,
+        build: BuildPulseSnapshot
     ) -> String {
         let cx: String
         if case .available(let snapshot) = codex, let remaining = snapshot.primaryLimit?.remainingPercent {
@@ -213,7 +237,13 @@ final class DiagnosticViewModel: ObservableObject {
             cr = "—"
         }
 
-        return "~ Cx \(cx) · Cr \(cr)"
+        var title = "~ Cx \(cx) · Cr \(cr)"
+        if build.phase == .running {
+            title += " · ⚒"
+        } else if build.phase == .finished {
+            title += " · ✓"
+        }
+        return title
     }
 
     func setFanBoostEnabled(_ enabled: Bool) {
@@ -692,6 +722,7 @@ struct MenuBarPanel: View {
 
             codexCard(report)
             cursorCard(report)
+            buildPulseCard
         }
     }
 
@@ -862,6 +893,35 @@ struct MenuBarPanel: View {
                     Text("Sign in to Cursor to show usage")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var buildPulseCard: some View {
+        let pulse = model.buildPulse
+        return ControlCenterCard {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: pulse.phase == .running ? "hammer.fill" : "hammer")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(pulse.phase == .running ? Color.orange : Color.secondary)
+                    Text("BUILD")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(pulse.phase == .running ? Color.orange : Color.secondary)
+                    Spacer()
+                    if pulse.phase == .running {
+                        ProgressView()
+                            .controlSize(.mini)
+                    }
+                }
+                Text(pulse.statusText)
+                    .font(.caption.weight(.semibold))
+                if let summary = pulse.commandSummary {
+                    Text(summary)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
                 }
             }
         }
