@@ -882,34 +882,62 @@ private struct DiagnosticContentView: View {
 }
 
 struct MenuBarPanel: View {
-    @EnvironmentObject private var model: DiagnosticViewModel
-    @State private var presentationID = UUID()
-    @Environment(\.colorScheme) private var colorScheme
+    private enum AgentPane: String, CaseIterable {
+        case codex
+        case cursor
 
-    private let panelWidth: CGFloat = 360
-
-    var body: some View {
-        VStack(spacing: 10) {
-            header
-            if model.slowdown.severity != .none {
-                slowdownBanner
-            }
-
-            if let report = model.report {
-                metricGrid(report)
-                actionRow
-                footerBar
-            } else {
-                ProgressView("Collecting…")
-                    .controlSize(.small)
-                    .frame(maxWidth: .infinity, minHeight: 120)
+        var title: String {
+            switch self {
+            case .codex: return "CODEX"
+            case .cursor: return "CURSOR"
             }
         }
-        .padding(12)
+
+        var symbol: String {
+            switch self {
+            case .codex: return "terminal"
+            case .cursor: return "arrow.triangle.2.circlepath.circle"
+            }
+        }
+    }
+
+    @EnvironmentObject private var model: DiagnosticViewModel
+    @State private var presentationID = UUID()
+    @State private var agentPane: AgentPane = .codex
+
+    private let panelWidth: CGFloat = 332
+    private let maxPanelHeight: CGFloat = 460
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+                .padding(.horizontal, 10)
+                .padding(.top, 10)
+                .padding(.bottom, 6)
+
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(spacing: 8) {
+                    if model.slowdown.severity != .none {
+                        slowdownBanner
+                    }
+
+                    if let report = model.report {
+                        metricGrid(report)
+                        actionRow
+                    } else {
+                        ProgressView("Collecting…")
+                            .controlSize(.small)
+                            .frame(maxWidth: .infinity, minHeight: 80)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.bottom, 10)
+            }
+        }
         .frame(width: panelWidth)
-        .fixedSize(horizontal: true, vertical: true)
+        .frame(maxHeight: maxPanelHeight)
         .background {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(.ultraThinMaterial)
         }
         .onAppear { model.setPresentation(presentationID, isActive: true) }
@@ -917,129 +945,95 @@ struct MenuBarPanel: View {
     }
 
     private var header: some View {
-        HStack(spacing: 10) {
-            ZStack {
-                Circle()
-                    .fill(panelStatusColor.opacity(0.18))
-                    .frame(width: 28, height: 28)
-                Text("~")
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
-                    .foregroundStyle(panelStatusColor)
-            }
-            VStack(alignment: .leading, spacing: 1) {
+        HStack(spacing: 8) {
+            Text("~")
+                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                .foregroundStyle(panelStatusColor)
+                .frame(width: 22, height: 22)
+                .background(Circle().fill(panelStatusColor.opacity(0.16)))
+            VStack(alignment: .leading, spacing: 0) {
                 Text("Tilde")
-                    .font(.headline)
+                    .font(.subheadline.weight(.semibold))
                 Text(statusText)
-                    .font(.caption)
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
-            Spacer(minLength: 8)
+            Spacer(minLength: 6)
             if model.runState == .running {
                 ProgressView()
-                    .controlSize(.small)
+                    .controlSize(.mini)
             }
         }
-        .padding(.horizontal, 4)
-        .padding(.top, 2)
     }
 
     private var slowdownBanner: some View {
         let advice = model.slowdown
         let tint: Color = advice.severity == .critical ? .red : .orange
-        return HStack(alignment: .top, spacing: 8) {
+        return HStack(spacing: 6) {
             Image(systemName: advice.severity == .critical ? "exclamationmark.triangle.fill" : "thermometer.medium")
+                .font(.caption2)
                 .foregroundStyle(tint)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(advice.title)
-                    .font(.caption.weight(.semibold))
-                Text(advice.detail)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            Text(advice.title)
+                .font(.caption2.weight(.semibold))
+                .lineLimit(1)
             Spacer(minLength: 0)
         }
-        .padding(10)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
         .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(tint.opacity(0.12))
         )
     }
 
     @ViewBuilder
     private func metricGrid(_ report: DiagnosticReport) -> some View {
-        // Two independent columns avoid Grid row height matching, which left
-        // empty space under the shorter CPU card before FAN started.
-        VStack(spacing: 10) {
-            HStack(alignment: .top, spacing: 10) {
-                VStack(spacing: 10) {
-                    cpuCard(report)
-                    fanCard
-                }
-                .frame(maxWidth: .infinity, alignment: .top)
-
-                VStack(spacing: 10) {
-                    memoryCard(report)
+        VStack(spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
+                cpuCard(report)
+                memoryCard(report)
+            }
+            HStack(alignment: .top, spacing: 8) {
+                fanCard
+                VStack(spacing: 8) {
                     storageCard(report)
                     networkCard(report.system.network)
                 }
-                .frame(maxWidth: .infinity, alignment: .top)
             }
-
-            codexCard(report)
-            cursorCard(report)
-            buildPulseCard
-            projectCard
-            focusModeCard
-            todayCard
+            agentCard(report)
+            contextStrip
+            focusStrip
         }
     }
 
     private func cpuCard(_ report: DiagnosticReport) -> some View {
         ControlCenterCard {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 6) {
-                    Image(systemName: "cpu")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 4) {
                     Text("CPU")
-                        .font(.caption.weight(.bold))
+                        .font(.caption2.weight(.bold))
                         .foregroundStyle(.secondary)
                     Spacer()
                     Text(cpuPercentText(report))
                         .font(.caption.weight(.semibold).monospacedDigit())
                 }
-
                 LiveResourceChart(samples: model.history, compact: true)
-                    .frame(height: 72)
-
-                if case .available(let cpu) = report.system.cpu {
-                    ColorBar(fraction: cpu.usagePercent / 100, color: .blue)
-                }
+                    .frame(height: 36)
             }
         }
     }
 
     private func memoryCard(_ report: DiagnosticReport) -> some View {
         ControlCenterCard {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 6) {
-                    Image(systemName: "memorychip")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text("RAM")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.secondary)
-                }
+            VStack(alignment: .leading, spacing: 4) {
+                Text("RAM")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.secondary)
                 if case .available(let memory) = report.system.memory, memory.totalBytes > 0 {
                     let usage = Double(memory.usedBytes) / Double(memory.totalBytes)
                     Text(percent(usage * 100))
                         .font(.title3.weight(.semibold).monospacedDigit())
-                    Text("U: \(bytes(memory.usedBytes))  T: \(bytes(memory.totalBytes))")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
                     ColorBar(
                         fraction: usage,
                         color: memory.pressure == .unavailable
@@ -1057,267 +1051,194 @@ struct MenuBarPanel: View {
 
     private func storageCard(_ report: DiagnosticReport) -> some View {
         ControlCenterCard {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 6) {
-                    Image(systemName: "internaldrive")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text("DISK")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.secondary)
-                }
+            VStack(alignment: .leading, spacing: 3) {
+                Text("DISK")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.secondary)
                 if case .available(let storage) = report.system.storage, storage.totalBytes > 0 {
                     let usage = Double(storage.usedBytes) / Double(storage.totalBytes)
                     Text(percent(usage * 100))
-                        .font(.title3.weight(.semibold).monospacedDigit())
-                    Text("U: \(bytes(storage.usedBytes))  T: \(bytes(storage.totalBytes))")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+                        .font(.callout.weight(.semibold).monospacedDigit())
                     ColorBar(fraction: usage, color: .blue)
                 } else {
                     Text("—")
-                        .font(.title3.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
             }
         }
     }
 
-    private func codexCard(_ report: DiagnosticReport) -> some View {
+    private func agentCard(_ report: DiagnosticReport) -> some View {
         ControlCenterCard {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 6) {
-                    Image(systemName: "terminal")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text("CODEX")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.secondary)
-                }
-                if case .available(let codex) = report.codex {
-                    let remaining = codex.primaryLimit?.remainingPercent
-                    Text(remaining.map { "\($0)%" } ?? "—")
-                        .font(.title3.weight(.semibold).monospacedDigit())
-                    Text("Remaining")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    if let remaining {
-                        ColorBar(fraction: Double(remaining) / 100, color: MetricColor.remaining(remaining))
+            VStack(alignment: .leading, spacing: 6) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        agentPane = agentPane == .codex ? .cursor : .codex
                     }
-                    Text("Today \(codex.tokensToday.map(compactCount) ?? "—") tokens")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 2)
-                } else {
-                    Text("—")
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text("Unavailable")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-    }
-
-    private func cursorCard(_ report: DiagnosticReport) -> some View {
-        ControlCenterCard {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 6) {
-                    Image(systemName: "arrow.triangle.2.circlepath.circle")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text("CURSOR")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: 4)
-                    if case .available(let cursor) = report.cursor, let plan = cursor.planName {
-                        Text(plan.uppercased())
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: agentPane.symbol)
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(.secondary)
-                    }
-                }
-                if case .available(let cursor) = report.cursor {
-                    Text(cursor.remainingPercent.map { "\($0)%" } ?? "—")
-                        .font(.title3.weight(.semibold).monospacedDigit())
-                    Text("Remaining")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    if let remaining = cursor.remainingPercent {
-                        ColorBar(fraction: Double(remaining) / 100, color: MetricColor.remaining(remaining))
-                    }
-                    if let message = cursor.displayMessage {
-                        Text(message)
-                            .font(.caption2)
+                        Text("AI · \(agentPane.title)")
+                            .font(.caption2.weight(.bold))
                             .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                            .padding(.top, 2)
-                    }
-                } else {
-                    Text("—")
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text("Sign in to Cursor to show usage")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-    }
-
-    private var buildPulseCard: some View {
-        let pulse = model.buildPulse
-        return ControlCenterCard {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 6) {
-                    Image(systemName: pulse.phase == .running ? "hammer.fill" : "hammer")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(pulse.phase == .running ? Color.orange : Color.secondary)
-                    Text("BUILD")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(pulse.phase == .running ? Color.orange : Color.secondary)
-                    Spacer()
-                    if pulse.phase == .running {
-                        ProgressView()
-                            .controlSize(.mini)
-                    }
-                }
-                Text(pulse.statusText)
-                    .font(.caption.weight(.semibold))
-                if let summary = pulse.commandSummary {
-                    Text(summary)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
-            }
-        }
-    }
-
-    private var projectCard: some View {
-        let project = model.projectContext
-        let ciTint: Color = {
-            switch project.ciStatus {
-            case .success: return .green
-            case .failure: return .red
-            case .pending: return .orange
-            case .cancelled, .unknown: return .secondary
-            }
-        }()
-        return ControlCenterCard {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 6) {
-                    Image(systemName: "folder")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text("PROJECT")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    if project.ciStatus != .unknown {
-                        Text(project.ciStatus.label)
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(ciTint)
-                    }
-                }
-                Text(project.chipText)
-                    .font(.caption.weight(.semibold).monospacedDigit())
-                Text(project.detailText)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-        }
-    }
-
-    private var focusModeCard: some View {
-        ControlCenterCard {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 6) {
-                    Image(systemName: "target")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text("FOCUS")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.secondary)
-                }
-                HStack(spacing: 6) {
-                    ForEach([FocusMode.ship, .meet, .battery], id: \.self) { mode in
-                        let selected = model.focusMode == mode
-                        Button {
-                            model.applyFocusMode(selected ? .off : mode)
-                        } label: {
-                            Text(mode.title)
-                                .font(.caption.weight(.semibold))
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 6)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                        .fill(selected ? Color.accentColor.opacity(0.22) : Color.primary.opacity(0.06))
-                                )
+                        Spacer(minLength: 4)
+                        if agentPane == .cursor,
+                           case .available(let cursor) = report.cursor,
+                           let plan = cursor.planName {
+                            Text(plan.uppercased())
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.secondary)
                         }
-                        .buttonStyle(.plain)
+                        Image(systemName: "arrow.left.arrow.right")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.tertiary)
                     }
                 }
-                Text(model.focusMode.detail)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                .buttonStyle(.plain)
+                .help("Tap to switch Codex / Cursor")
+
+                switch agentPane {
+                case .codex:
+                    agentRemaining(
+                        percent: {
+                            if case .available(let codex) = report.codex {
+                                return codex.primaryLimit?.remainingPercent
+                            }
+                            return nil
+                        }(),
+                        detail: {
+                            if case .available(let codex) = report.codex {
+                                return "Today \(codex.tokensToday.map(compactCount) ?? "—") tokens"
+                            }
+                            return "Unavailable"
+                        }()
+                    )
+                case .cursor:
+                    agentRemaining(
+                        percent: {
+                            if case .available(let cursor) = report.cursor {
+                                return cursor.remainingPercent
+                            }
+                            return nil
+                        }(),
+                        detail: {
+                            if case .available(let cursor) = report.cursor {
+                                return cursor.displayMessage ?? "Remaining allowance"
+                            }
+                            return "Sign in to Cursor"
+                        }()
+                    )
+                }
             }
         }
     }
 
-    private var todayCard: some View {
-        let today = model.todaySummary
-        return ControlCenterCard {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 6) {
-                    Image(systemName: "book.closed")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text("TODAY")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.secondary)
-                }
-                Text(today.headline)
-                    .font(.caption.weight(.semibold))
-                Text(today.detailText)
+    private func agentRemaining(percent: Int?, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(percent.map { "\($0)%" } ?? "—")
+                    .font(.title3.weight(.semibold).monospacedDigit())
+                Text("left")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
+            }
+            if let percent {
+                ColorBar(fraction: Double(percent) / 100, color: MetricColor.remaining(percent))
+            }
+            Text(detail)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+    }
+
+    private var contextStrip: some View {
+        ControlCenterCard {
+            VStack(alignment: .leading, spacing: 4) {
+                compactRow(
+                    symbol: model.buildPulse.phase == .running ? "hammer.fill" : "hammer",
+                    label: "Build",
+                    value: model.buildPulse.statusText,
+                    tint: model.buildPulse.phase == .running ? .orange : .secondary
+                )
+                compactRow(
+                    symbol: "folder",
+                    label: "Project",
+                    value: model.projectContext.hasProject
+                        ? "\(model.projectContext.projectName ?? "Repo") · \(model.projectContext.chipText)"
+                        : "No project",
+                    tint: .secondary
+                )
+                compactRow(
+                    symbol: "book.closed",
+                    label: "Today",
+                    value: model.todaySummary.headline,
+                    tint: .secondary
+                )
+            }
+        }
+    }
+
+    private func compactRow(symbol: String, label: String, value: String, tint: Color) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: symbol)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(tint)
+                .frame(width: 12)
+            Text(label)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.secondary)
+                .frame(width: 46, alignment: .leading)
+            Text(value)
+                .font(.caption2.weight(.medium))
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var focusStrip: some View {
+        ControlCenterCard {
+            HStack(spacing: 6) {
+                Text("FOCUS")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.secondary)
+                ForEach([FocusMode.ship, .meet, .battery], id: \.self) { mode in
+                    let selected = model.focusMode == mode
+                    Button {
+                        model.applyFocusMode(selected ? .off : mode)
+                    } label: {
+                        Text(mode.title)
+                            .font(.caption2.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 5)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(selected ? Color.accentColor.opacity(0.22) : Color.primary.opacity(0.06))
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
             }
         }
     }
 
     private func networkCard(_ availability: Availability<NetworkReading>) -> some View {
         ControlCenterCard {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 6) {
-                    Image(systemName: "network")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text("NETWORK")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.secondary)
-                }
+            VStack(alignment: .leading, spacing: 3) {
+                Text("NET")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.secondary)
                 if case .available(let network) = availability {
-                    HStack(spacing: 12) {
-                        Label(network.downloadBytesPerSecond.map(rate) ?? "—", systemImage: "arrow.down")
-                            .foregroundStyle(.blue)
-                        Label(network.uploadBytesPerSecond.map(rate) ?? "—", systemImage: "arrow.up")
-                            .foregroundStyle(.orange)
-                    }
-                    .font(.caption.weight(.semibold).monospacedDigit())
-
-                    Text(network.localIPAddress ?? network.interfaceName ?? "Offline")
-                        .font(.caption2)
-                        .foregroundStyle(.blue.opacity(0.9))
-                        .padding(.top, 4)
+                    Text("↓ \(network.downloadBytesPerSecond.map(rate) ?? "—")")
+                        .font(.caption2.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(.blue)
+                    Text("↑ \(network.uploadBytesPerSecond.map(rate) ?? "—")")
+                        .font(.caption2.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(.orange)
                 } else {
-                    Text("Unavailable")
-                        .font(.caption)
+                    Text("—")
                         .foregroundStyle(.secondary)
                 }
             }
@@ -1328,15 +1249,12 @@ struct MenuBarPanel: View {
         let isActive = model.fanBoost.isActivelyBoosting
         let isPending = model.fanBoost.isPending
         return ControlCenterCard {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 6) {
-                    Image(systemName: "fan")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(isActive ? Color.green : Color.secondary)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 4) {
                     Text("FAN")
-                        .font(.caption.weight(.bold))
+                        .font(.caption2.weight(.bold))
                         .foregroundStyle(isActive ? Color.green : Color.secondary)
-                    Spacer(minLength: 4)
+                    Spacer(minLength: 2)
                     Toggle("", isOn: Binding(
                         get: { model.isFanBoostEnabled },
                         set: { model.setFanBoostEnabled($0) }
@@ -1348,21 +1266,13 @@ struct MenuBarPanel: View {
                 }
 
                 FanWindAnimationView(isRunning: isActive)
+                    .scaleEffect(0.78)
+                    .frame(height: 40)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("Min")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text("\(model.fanBoost.speedPercent)%")
-                            .font(.caption.weight(.bold).monospacedDigit())
-                            .foregroundStyle(isActive ? Color.green : Color.primary)
-                        Spacer()
-                        Text("Max")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                    }
+                HStack {
+                    Text("\(model.fanBoost.speedPercent)%")
+                        .font(.caption2.weight(.bold).monospacedDigit())
+                        .foregroundStyle(isActive ? Color.green : Color.primary)
                     Slider(
                         value: Binding(
                             get: { model.fanBoost.speed },
@@ -1372,45 +1282,20 @@ struct MenuBarPanel: View {
                     )
                     .tint(isActive ? Color(red: 0.22, green: 0.78, blue: 0.38) : Color.secondary.opacity(0.7))
                     .disabled(isPending)
-                    .controlSize(.small)
-                }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        if isPending {
-                            ProgressView()
-                                .controlSize(.mini)
-                        }
-                        Text(model.fanBoost.statusText)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(isActive ? Color.green : Color.primary)
-                    }
-                    Text(model.fanBoost.detailText)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
+                    .controlSize(.mini)
                 }
             }
         }
     }
 
     private var actionRow: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 10) {
             ControlCenterAction(
                 title: "Open",
                 systemImage: "macwindow",
                 tint: .blue
             ) {
                 NotificationCenter.default.post(name: .tildeOpenMainWindow, object: nil)
-            }
-
-            ControlCenterAction(
-                title: "Cursor",
-                systemImage: "chevron.left.forwardslash.chevron.right",
-                tint: .purple
-            ) {
-                model.openCursor()
             }
 
             ControlCenterAction(
@@ -1439,25 +1324,6 @@ struct MenuBarPanel: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, 4)
-    }
-
-    private var footerBar: some View {
-        HStack {
-            Text(model.menuBarTitle)
-                .font(.caption.weight(.medium).monospacedDigit())
-                .foregroundStyle(.secondary)
-            Spacer()
-            Image(systemName: "ellipsis")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.tertiary)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background {
-            Capsule(style: .continuous)
-                .fill(Color.primary.opacity(colorScheme == .dark ? 0.12 : 0.06))
-        }
     }
 
     private var statusText: String {
@@ -1509,14 +1375,14 @@ private struct ControlCenterCard<Content: View>: View {
 
     var body: some View {
         content
-            .padding(12)
+            .padding(8)
             .frame(maxWidth: .infinity, alignment: .topLeading)
             .background {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(.regularMaterial)
             }
             .overlay {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
             }
     }

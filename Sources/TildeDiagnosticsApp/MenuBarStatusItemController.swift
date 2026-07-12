@@ -31,7 +31,7 @@ final class MenuBarStatusItemController: NSObject {
             popover.behavior = .transient
             popover.animates = true
             // Fit content tightly — a fixed tall size left an empty gap under the panel.
-            popover.contentSize = NSSize(width: 384, height: 560)
+            popover.contentSize = NSSize(width: 332, height: 420)
             let root = MenuBarPanel()
                 .environmentObject(model)
                 .background(
@@ -41,9 +41,10 @@ final class MenuBarStatusItemController: NSObject {
                 )
                 .onPreferenceChange(PanelSizeKey.self) { size in
                     guard size.width > 0, size.height > 0 else { return }
+                    let height = min(ceil(size.height), 460)
                     self.popover?.contentSize = NSSize(
                         width: ceil(size.width),
-                        height: ceil(size.height)
+                        height: height
                     )
                 }
             let host = NSHostingController(rootView: root)
