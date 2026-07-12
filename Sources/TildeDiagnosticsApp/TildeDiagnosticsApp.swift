@@ -135,13 +135,16 @@ final class DiagnosticViewModel: ObservableObject {
     @Published private(set) var fanBoost: FanBoostController.Snapshot = .idle
     @Published private(set) var buildPulse = BuildPulseSnapshot()
     @Published private(set) var slowdown = SlowdownAdvice.none
+    @Published private(set) var projectContext = ProjectContextSnapshot.empty
     private let liveMonitoring = LiveMonitoringService()
     private let fanBoostController = FanBoostController()
     private let buildPulseMonitor = BuildPulseMonitor()
+    private let projectContextMonitor = ProjectContextMonitor()
     private let slowdownNotifier = SlowdownNotifier()
     private var historyBuffer = LiveMetricHistory()
     private var subscriptionTask: Task<Void, Never>?
     private var buildPulseTask: Task<Void, Never>?
+    private var projectContextTask: Task<Void, Never>?
     private var speedWriteTask: Task<Void, Never>?
     private var didAskNotificationAuth = false
     private let menuBarPresentationID = UUID()
@@ -190,10 +193,29 @@ final class DiagnosticViewModel: ObservableObject {
                         codex: report.codex,
                         cursor: report.cursor,
                         build: snapshot,
-                        slowdown: self.slowdown
+                        slowdown: self.slowdown,
+                        project: self.projectContext
                     )
                 }
                 try? await Task.sleep(for: .seconds(2))
+            }
+        }
+        projectContextTask?.cancel()
+        projectContextTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { break }
+                let snapshot = await self.projectContextMonitor.snapshot()
+                self.projectContext = snapshot
+                if let report = self.report {
+                    self.publishMenuBarTitle(
+                        codex: report.codex,
+                        cursor: report.cursor,
+                        build: self.buildPulse,
+                        slowdown: self.slowdown,
+                        project: snapshot
+                    )
+                }
+                try? await Task.sleep(for: .seconds(5))
             }
         }
     }
@@ -213,7 +235,8 @@ final class DiagnosticViewModel: ObservableObject {
             codex: report.codex,
             cursor: report.cursor,
             build: buildPulse,
-            slowdown: advice
+            slowdown: advice,
+            project: projectContext
         )
         if fanBoost.isEnabled {
             Task {
@@ -228,9 +251,16 @@ final class DiagnosticViewModel: ObservableObject {
         codex: Availability<CodexDiagnosticSnapshot>,
         cursor: Availability<CursorUsageSnapshot>,
         build: BuildPulseSnapshot,
-        slowdown: SlowdownAdvice
+        slowdown: SlowdownAdvice,
+        project: ProjectContextSnapshot
     ) {
-        menuBarTitle = Self.makeMenuBarTitle(from: codex, cursor: cursor, build: build, slowdown: slowdown)
+        menuBarTitle = Self.makeMenuBarTitle(
+            from: codex,
+            cursor: cursor,
+            build: build,
+            slowdown: slowdown,
+            project: project
+        )
         MenuBarStatusItemController.shared.updateTitle(menuBarTitle)
         NotificationCenter.default.post(
             name: .tildeMenuBarTitleDidChange,
@@ -243,7 +273,8 @@ final class DiagnosticViewModel: ObservableObject {
         from codex: Availability<CodexDiagnosticSnapshot>,
         cursor: Availability<CursorUsageSnapshot>,
         build: BuildPulseSnapshot,
-        slowdown: SlowdownAdvice
+        slowdown: SlowdownAdvice,
+        project: ProjectContextSnapshot
     ) -> String {
         let cx: String
         if case .available(let snapshot) = codex, let remaining = snapshot.primaryLimit?.remainingPercent {
@@ -272,6 +303,10 @@ final class DiagnosticViewModel: ObservableObject {
             title += " · !"
         case .none:
             break
+        }
+        if let branch = project.branch {
+            let short = branch.count > 16 ? String(branch.prefix(14)) + "…" : branch
+            title += " · \(short)\(project.isDirty ? "*" : "")"
         }
         return title
     }
@@ -779,6 +814,7 @@ struct MenuBarPanel: View {
             codexCard(report)
             cursorCard(report)
             buildPulseCard
+            projectCard
         }
     }
 
@@ -979,6 +1015,42 @@ struct MenuBarPanel: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }
+            }
+        }
+    }
+
+    private var projectCard: some View {
+        let project = model.projectContext
+        let ciTint: Color = {
+            switch project.ciStatus {
+            case .success: return .green
+            case .failure: return .red
+            case .pending: return .orange
+            case .cancelled, .unknown: return .secondary
+            }
+        }()
+        return ControlCenterCard {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "folder")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text("PROJECT")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if project.ciStatus != .unknown {
+                        Text(project.ciStatus.label)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(ciTint)
+                    }
+                }
+                Text(project.chipText)
+                    .font(.caption.weight(.semibold).monospacedDigit())
+                Text(project.detailText)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
             }
         }
     }
