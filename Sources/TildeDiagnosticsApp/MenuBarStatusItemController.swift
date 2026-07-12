@@ -86,6 +86,7 @@ final class MenuBarStatusItemController: NSObject {
 extension Notification.Name {
     static let tildeMenuBarTitleDidChange = Notification.Name("tildeMenuBarTitleDidChange")
     static let tildeOpenMainWindow = Notification.Name("tildeOpenMainWindow")
+    static let tildeHandleDeepLink = Notification.Name("tildeHandleDeepLink")
 }
 
 private struct PanelSizeKey: PreferenceKey {
