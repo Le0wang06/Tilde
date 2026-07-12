@@ -448,10 +448,6 @@ final class DiagnosticViewModel: ObservableObject {
         case .none:
             break
         }
-        if let branch = project.branch {
-            let short = branch.count > 16 ? String(branch.prefix(14)) + "…" : branch
-            title += " · \(short)\(project.isDirty ? "*" : "")"
-        }
         if focus != .off {
             title += " · \(focus.title)"
         }
