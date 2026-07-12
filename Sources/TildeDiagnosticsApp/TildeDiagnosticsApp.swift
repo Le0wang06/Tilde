@@ -179,7 +179,7 @@ final class DiagnosticViewModel: ObservableObject {
         self.report = report
         historyBuffer.append(LiveMetricSample(snapshot: report.system))
         history = historyBuffer.samples
-        menuBarTitle = Self.makeMenuBarTitle(from: report.codex)
+        menuBarTitle = Self.makeMenuBarTitle(from: report.codex, cursor: report.cursor)
         MenuBarStatusItemController.shared.updateTitle(menuBarTitle)
         NotificationCenter.default.post(
             name: .tildeMenuBarTitleDidChange,
@@ -195,19 +195,25 @@ final class DiagnosticViewModel: ObservableObject {
         runState.apply(.finish)
     }
 
-    private static func makeMenuBarTitle(from codex: Availability<CodexDiagnosticSnapshot>) -> String {
-        guard case .available(let snapshot) = codex else {
-            return "~ —"
+    private static func makeMenuBarTitle(
+        from codex: Availability<CodexDiagnosticSnapshot>,
+        cursor: Availability<CursorUsageSnapshot>
+    ) -> String {
+        let cx: String
+        if case .available(let snapshot) = codex, let remaining = snapshot.primaryLimit?.remainingPercent {
+            cx = "\(remaining)%"
+        } else {
+            cx = "—"
         }
 
-        let remaining = snapshot.primaryLimit.map { "\($0.remainingPercent)%" } ?? "—"
-        let tokens: String
-        if let tokensToday = snapshot.tokensToday {
-            tokens = tokensToday.formatted(.number.notation(.compactName))
+        let cr: String
+        if case .available(let snapshot) = cursor, let remaining = snapshot.remainingPercent {
+            cr = "\(remaining)%"
         } else {
-            tokens = "—"
+            cr = "—"
         }
-        return "~ \(remaining) · \(tokens)"
+
+        return "~ Cx \(cx) · Cr \(cr)"
     }
 
     func setFanBoostEnabled(_ enabled: Bool) {
@@ -685,6 +691,7 @@ struct MenuBarPanel: View {
             }
 
             codexCard(report)
+            cursorCard(report)
         }
     }
 
@@ -808,6 +815,51 @@ struct MenuBarPanel: View {
                         .font(.title3.weight(.semibold))
                         .foregroundStyle(.secondary)
                     Text("Unavailable")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private func cursorCard(_ report: DiagnosticReport) -> some View {
+        ControlCenterCard {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.triangle.2.circlepath.circle")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text("CURSOR")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 4)
+                    if case .available(let cursor) = report.cursor, let plan = cursor.planName {
+                        Text(plan.uppercased())
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if case .available(let cursor) = report.cursor {
+                    Text(cursor.remainingPercent.map { "\($0)%" } ?? "—")
+                        .font(.title3.weight(.semibold).monospacedDigit())
+                    Text("Remaining")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    if let remaining = cursor.remainingPercent {
+                        ColorBar(fraction: Double(remaining) / 100, color: MetricColor.remaining(remaining))
+                    }
+                    if let message = cursor.displayMessage {
+                        Text(message)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .padding(.top, 2)
+                    }
+                } else {
+                    Text("—")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text("Sign in to Cursor to show usage")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }

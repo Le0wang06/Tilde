@@ -9,6 +9,7 @@ public enum LiveMetric: CaseIterable, Hashable, Sendable {
     case thermal
     case advancedSensors
     case codex
+    case cursor
 }
 
 public struct SamplingInterval: Equatable, Sendable {
@@ -37,6 +38,7 @@ public struct AdaptiveSamplingPolicy: Sendable {
         .thermal: SamplingInterval(foreground: 2, background: 10),
         .advancedSensors: SamplingInterval(foreground: 2, background: 10),
         .codex: SamplingInterval(foreground: 60, background: 120),
+        .cursor: SamplingInterval(foreground: 120, background: 300),
     ])
 
     public init(intervals: [LiveMetric: SamplingInterval]) {

@@ -59,9 +59,15 @@ public struct CodexDiagnosticSnapshot: Sendable {
 public struct DiagnosticReport: Sendable {
     public let system: SystemSnapshot
     public let codex: Availability<CodexDiagnosticSnapshot>
+    public let cursor: Availability<CursorUsageSnapshot>
 
-    public init(system: SystemSnapshot, codex: Availability<CodexDiagnosticSnapshot>) {
+    public init(
+        system: SystemSnapshot,
+        codex: Availability<CodexDiagnosticSnapshot>,
+        cursor: Availability<CursorUsageSnapshot> = .unavailable(reason: "Waiting for first Cursor sample")
+    ) {
         self.system = system
         self.codex = codex
+        self.cursor = cursor
     }
 }

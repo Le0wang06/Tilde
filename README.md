@@ -46,8 +46,8 @@ Run calculation and state tests:
 - Codex executable/version detection
 - Codex App Server initialization, account, rate-limit, token-usage, and thread-list probes
 - Native `MenuBarExtra` with health summary, refresh, open-window, and quit actions
-- Menu bar title shows a tilde mark with remaining allowance and tokens used today (e.g. `~ 67% · 12K`) as an AppKit status item at the top of the screen
-- Control Center–style menu panel with CPU/RAM/Disk/Network/Codex cards and Fan Boost (real SMC fan control via `tilde-fan`, green spinning fan + `~` spray while on; admin password once per login via a background daemon)
+- Menu bar title shows Codex + Cursor remaining allowance (e.g. `~ Cx 67% · Cr 45%`)
+- Control Center–style menu panel with CPU/RAM/Disk/Network/Codex/Cursor cards and Fan Boost (real SMC fan control via `tilde-fan`, green spinning fan + `~` spray while on; admin password once per login via a background daemon)
 
 ## Live updates
 

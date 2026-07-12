@@ -3,6 +3,7 @@ import Foundation
 public protocol LiveDiagnosticCoordinating: Sendable {
     func sampleSystem(previous: SystemSnapshot?, metrics: Set<LiveMetric>) async -> SystemSnapshot
     func runCodexDiagnostics() async -> Availability<CodexDiagnosticSnapshot>
+    func runCursorDiagnostics() async -> Availability<CursorUsageSnapshot>
 }
 
 extension MonitoringCoordinator: LiveDiagnosticCoordinating {}
@@ -115,19 +116,28 @@ public actor LiveMonitoringService {
         let due = forceAll
             ? Set(LiveMetric.allCases)
             : policy.dueMetrics(lastSampled: lastSampled, now: now, isForeground: isForeground)
-        let systemMetrics = due.subtracting([.codex])
+        let systemMetrics = due.subtracting([.codex, .cursor])
         let previousSystem = latestReport?.system
+        let needsCodex = due.contains(.codex)
+        let needsCursor = due.contains(.cursor)
 
-        let report: DiagnosticReport
-        if due.contains(.codex) {
-            async let system = coordinator.sampleSystem(previous: previousSystem, metrics: systemMetrics)
-            async let codex = coordinator.runCodexDiagnostics()
-            report = await DiagnosticReport(system: system, codex: codex)
+        let system = await coordinator.sampleSystem(previous: previousSystem, metrics: systemMetrics)
+
+        let codex: Availability<CodexDiagnosticSnapshot>
+        if needsCodex {
+            codex = await coordinator.runCodexDiagnostics()
         } else {
-            let system = await coordinator.sampleSystem(previous: previousSystem, metrics: systemMetrics)
-            let codex = latestReport?.codex ?? .unavailable(reason: "Waiting for first Codex sample")
-            report = DiagnosticReport(system: system, codex: codex)
+            codex = latestReport?.codex ?? .unavailable(reason: "Waiting for first Codex sample")
         }
+
+        let cursor: Availability<CursorUsageSnapshot>
+        if needsCursor {
+            cursor = await coordinator.runCursorDiagnostics()
+        } else {
+            cursor = latestReport?.cursor ?? .unavailable(reason: "Waiting for first Cursor sample")
+        }
+
+        let report = DiagnosticReport(system: system, codex: codex, cursor: cursor)
 
         for metric in due {
             lastSampled[metric] = now
