@@ -15,6 +15,11 @@ public enum FanDaemonProtocol {
     public static func socketURL(uid: uid_t = getuid()) -> URL {
         URL(fileURLWithPath: "/tmp/tilde-fan-\(uid).sock")
     }
+
+    public static func boostCommand(fraction: Double) -> String {
+        let clamped = min(max(fraction, 0.15), 1.0)
+        return "\(boost) \(String(format: "%.3f", clamped))"
+    }
 }
 
 public enum FanDaemonClient {
@@ -98,13 +103,13 @@ public enum FanDaemonError: Error, LocalizedError {
 public final class FanDaemonServer: @unchecked Sendable {
     private let socketPath: String
     private let ownerUID: uid_t
-    private let boostFraction: Double
     private let lock = NSLock()
+    private var boostFraction: Double
     private var holding = false
     private var shouldStop = false
     private var holdThread: Thread?
 
-    public init(socketPath: String, ownerUID: uid_t, boostFraction: Double = 0.85) {
+    public init(socketPath: String, ownerUID: uid_t, boostFraction: Double = 0.7) {
         self.socketPath = socketPath
         self.ownerUID = ownerUID
         self.boostFraction = boostFraction
@@ -194,10 +199,17 @@ public final class FanDaemonServer: @unchecked Sendable {
         }
 
         do {
-            switch line {
+            let parts = line.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+            let command = String(parts[0])
+            switch command {
             case FanDaemonProtocol.ping:
                 _ = writeResponse(fd, "ok")
             case FanDaemonProtocol.boost:
+                if parts.count > 1, let value = Double(parts[1]) {
+                    lock.lock()
+                    boostFraction = min(max(value, 0.15), 1.0)
+                    lock.unlock()
+                }
                 lock.lock(); holding = true; lock.unlock()
                 try applyBoost()
                 _ = writeResponse(fd, "ok")
@@ -226,11 +238,14 @@ public final class FanDaemonServer: @unchecked Sendable {
     }
 
     private func applyBoost() throws {
+        lock.lock()
+        let fraction = boostFraction
+        lock.unlock()
         let smc = try SMC()
         let fans = try smc.readFans()
         guard !fans.isEmpty else { throw SMCError.serviceNotFound("fan keys") }
         for fan in fans {
-            let target = max(fan.minRPM, Int(Double(fan.maxRPM) * boostFraction))
+            let target = Self.targetRPM(for: fan, fraction: fraction)
             try smc.setFanTarget(index: fan.index, rpm: target)
         }
     }
@@ -242,5 +257,11 @@ public final class FanDaemonServer: @unchecked Sendable {
             try smc.restoreFanAuto(index: fan.index)
         }
         try? smc.resetFanTestUnlock()
+    }
+
+    public static func targetRPM(for fan: FanInfo, fraction: Double) -> Int {
+        let clamped = min(max(fraction, 0.15), 1.0)
+        let span = max(0, fan.maxRPM - fan.minRPM)
+        return fan.minRPM + Int(Double(span) * clamped)
     }
 }

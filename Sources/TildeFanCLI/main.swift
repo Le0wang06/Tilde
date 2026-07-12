@@ -11,15 +11,15 @@ enum TildeFanCLI {
             case "status":
                 try runStatus()
             case "boost":
-                try runBoost()
+                try runBoost(fraction: Double(args.dropFirst().first ?? "") ?? 0.7)
             case "hold":
-                try runHold()
+                try runHold(fraction: Double(args.dropFirst().first ?? "") ?? 0.7)
             case "auto":
                 try runAuto()
             case "daemon":
                 try runDaemon(args: Array(args.dropFirst()))
             default:
-                fputs("Usage: tilde-fan status|boost|hold|auto|daemon\n", stderr)
+                fputs("Usage: tilde-fan status|boost [0.15-1]|hold [0.15-1]|auto|daemon\n", stderr)
                 exit(64)
             }
         } catch {
@@ -40,7 +40,7 @@ enum TildeFanCLI {
         }
     }
 
-    private static func runBoost() throws {
+    private static func runBoost(fraction: Double) throws {
         let smc = try SMC()
         let fans = try smc.readFans()
         guard !fans.isEmpty else {
@@ -48,14 +48,14 @@ enum TildeFanCLI {
             exit(2)
         }
         for fan in fans {
-            let target = max(fan.minRPM, Int(Double(fan.maxRPM) * 0.85))
+            let target = FanDaemonServer.targetRPM(for: fan, fraction: fraction)
             try smc.setFanTarget(index: fan.index, rpm: target)
             print("fan\(fan.index) -> \(target)")
         }
     }
 
     /// Keep re-applying boost until SIGTERM/SIGINT (legacy one-shot hold).
-    private static func runHold() throws {
+    private static func runHold(fraction: Double) throws {
         signal(SIGTERM, SIG_DFL)
         signal(SIGINT, SIG_DFL)
 
@@ -72,7 +72,7 @@ enum TildeFanCLI {
         signal(SIGINT, SIG_IGN)
 
         while !shouldStop {
-            try runBoost()
+            try runBoost(fraction: fraction)
             for _ in 0..<16 {
                 if shouldStop { break }
                 Thread.sleep(forTimeInterval: 0.5)
