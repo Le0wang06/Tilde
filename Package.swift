@@ -19,7 +19,8 @@ let package = Package(
         ),
         .executableTarget(
             name: "TildeDiagnosticsApp",
-            dependencies: ["TildeCore"]
+            dependencies: ["TildeCore"],
+            exclude: ["Info.plist"]
         ),
         .executableTarget(
             name: "TildeProbe",

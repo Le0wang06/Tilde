@@ -20,6 +20,14 @@ swift build
 swift run TildeDiagnostics
 ```
 
+For `tilde://` deep links (open window, refresh, copy status, open Cursor, focus modes), package and launch as an app so Launch Services registers the URL scheme:
+
+```sh
+chmod +x Scripts/run-app.sh
+./Scripts/run-app.sh
+open 'tilde://refresh'
+```
+
 Run the non-GUI feasibility report:
 
 ```sh

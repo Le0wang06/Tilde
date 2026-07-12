@@ -36,6 +36,7 @@ final class TildeAppDelegate: NSObject, NSApplicationDelegate {
     var model: DiagnosticViewModel?
     private var hostedMainWindow: NSWindow?
     private var openMainWindowObserver: NSObjectProtocol?
+    private var deepLinkObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Self.shared = self
@@ -55,6 +56,55 @@ final class TildeAppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor in
                 self?.presentMainWindow()
             }
+        }
+
+        deepLinkObserver = NotificationCenter.default.addObserver(
+            forName: .tildeHandleDeepLink,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            let url = note.object as? URL
+            Task { @MainActor in
+                if let url {
+                    self?.handleDeepLink(url)
+                }
+            }
+        }
+
+        NSAppleEventManager.shared().setEventHandler(
+            self,
+            andSelector: #selector(handleGetURLEvent(_:withReplyEvent:)),
+            forEventClass: AEEventClass(0x4755524C), // 'GURL'
+            andEventID: AEEventID(0x4755524C) // 'GURL'
+        )
+    }
+
+    @objc private func handleGetURLEvent(_ event: NSAppleEventDescriptor, withReplyEvent reply: NSAppleEventDescriptor) {
+        guard let string = event.paramDescriptor(forKeyword: AEKeyword(0x2D2D2D2D))?.stringValue, // keyDirectObject '----'
+              let url = URL(string: string) else { return }
+        handleDeepLink(url)
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            handleDeepLink(url)
+        }
+    }
+
+    func handleDeepLink(_ url: URL) {
+        guard let action = DeepLinkAction.parse(url: url) else { return }
+        model?.startIfNeeded()
+        switch action {
+        case .openWindow:
+            presentMainWindow()
+        case .refresh:
+            model?.refresh()
+        case .copyStatus:
+            model?.copyStatusToPasteboard()
+        case .openCursor:
+            model?.openCursor()
+        case .focus(let mode):
+            model?.applyFocusMode(mode)
         }
     }
 
@@ -401,6 +451,38 @@ final class DiagnosticViewModel: ObservableObject {
         Task {
             await liveMonitoring.refreshNow()
         }
+    }
+
+    func openCursor() {
+        let candidates = [
+            "/Applications/Cursor.app",
+            "\(NSHomeDirectory())/Applications/Cursor.app",
+        ]
+        for path in candidates where FileManager.default.fileExists(atPath: path) {
+            NSWorkspace.shared.open(URL(fileURLWithPath: path))
+            return
+        }
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.todesktop.230313mzl4w4u92") {
+            NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+        }
+    }
+
+    func copyStatusToPasteboard() {
+        var lines: [String] = [menuBarTitle]
+        if let project = projectContext.projectName {
+            lines.append("Project: \(project) · \(projectContext.chipText)")
+        }
+        if focusMode != .off {
+            lines.append("Focus: \(focusMode.title)")
+        }
+        if slowdown.severity != .none {
+            lines.append("\(slowdown.title): \(slowdown.detail)")
+        }
+        if buildPulse.phase != .idle {
+            lines.append("Build: \(buildPulse.statusText)")
+        }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(lines.joined(separator: "\n"), forType: .string)
     }
 
     func setPresentation(_ id: UUID, isActive: Bool) {
@@ -1234,13 +1316,29 @@ struct MenuBarPanel: View {
     }
 
     private var actionRow: some View {
-        HStack(spacing: 18) {
+        HStack(spacing: 14) {
             ControlCenterAction(
                 title: "Open",
                 systemImage: "macwindow",
                 tint: .blue
             ) {
                 NotificationCenter.default.post(name: .tildeOpenMainWindow, object: nil)
+            }
+
+            ControlCenterAction(
+                title: "Cursor",
+                systemImage: "chevron.left.forwardslash.chevron.right",
+                tint: .purple
+            ) {
+                model.openCursor()
+            }
+
+            ControlCenterAction(
+                title: "Copy",
+                systemImage: "doc.on.doc",
+                tint: .primary
+            ) {
+                model.copyStatusToPasteboard()
             }
 
             ControlCenterAction(
