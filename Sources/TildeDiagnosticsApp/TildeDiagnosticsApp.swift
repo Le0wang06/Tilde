@@ -136,6 +136,7 @@ final class DiagnosticViewModel: ObservableObject {
     @Published private(set) var buildPulse = BuildPulseSnapshot()
     @Published private(set) var slowdown = SlowdownAdvice.none
     @Published private(set) var projectContext = ProjectContextSnapshot.empty
+    @Published private(set) var focusMode: FocusMode = .off
     private let liveMonitoring = LiveMonitoringService()
     private let fanBoostController = FanBoostController()
     private let buildPulseMonitor = BuildPulseMonitor()
@@ -194,7 +195,8 @@ final class DiagnosticViewModel: ObservableObject {
                         cursor: report.cursor,
                         build: snapshot,
                         slowdown: self.slowdown,
-                        project: self.projectContext
+                        project: self.projectContext,
+                        focus: self.focusMode
                     )
                 }
                 try? await Task.sleep(for: .seconds(2))
@@ -212,7 +214,8 @@ final class DiagnosticViewModel: ObservableObject {
                         cursor: report.cursor,
                         build: self.buildPulse,
                         slowdown: self.slowdown,
-                        project: snapshot
+                        project: snapshot,
+                        focus: self.focusMode
                     )
                 }
                 try? await Task.sleep(for: .seconds(5))
@@ -236,7 +239,8 @@ final class DiagnosticViewModel: ObservableObject {
             cursor: report.cursor,
             build: buildPulse,
             slowdown: advice,
-            project: projectContext
+            project: projectContext,
+            focus: focusMode
         )
         if fanBoost.isEnabled {
             Task {
@@ -252,14 +256,16 @@ final class DiagnosticViewModel: ObservableObject {
         cursor: Availability<CursorUsageSnapshot>,
         build: BuildPulseSnapshot,
         slowdown: SlowdownAdvice,
-        project: ProjectContextSnapshot
+        project: ProjectContextSnapshot,
+        focus: FocusMode
     ) {
         menuBarTitle = Self.makeMenuBarTitle(
             from: codex,
             cursor: cursor,
             build: build,
             slowdown: slowdown,
-            project: project
+            project: project,
+            focus: focus
         )
         MenuBarStatusItemController.shared.updateTitle(menuBarTitle)
         NotificationCenter.default.post(
@@ -274,7 +280,8 @@ final class DiagnosticViewModel: ObservableObject {
         cursor: Availability<CursorUsageSnapshot>,
         build: BuildPulseSnapshot,
         slowdown: SlowdownAdvice,
-        project: ProjectContextSnapshot
+        project: ProjectContextSnapshot,
+        focus: FocusMode
     ) -> String {
         let cx: String
         if case .available(let snapshot) = codex, let remaining = snapshot.primaryLimit?.remainingPercent {
@@ -308,7 +315,36 @@ final class DiagnosticViewModel: ObservableObject {
             let short = branch.count > 16 ? String(branch.prefix(14)) + "…" : branch
             title += " · \(short)\(project.isDirty ? "*" : "")"
         }
+        if focus != .off {
+            title += " · \(focus.title)"
+        }
         return title
+    }
+
+    func applyFocusMode(_ mode: FocusMode) {
+        focusMode = mode
+        if let report {
+            publishMenuBarTitle(
+                codex: report.codex,
+                cursor: report.cursor,
+                build: buildPulse,
+                slowdown: slowdown,
+                project: projectContext,
+                focus: mode
+            )
+        }
+
+        if let speed = mode.fanSpeed {
+            setFanBoostSpeed(speed)
+        }
+        if let enabled = mode.fanEnabled {
+            setFanBoostEnabled(enabled)
+        }
+        for bundleID in mode.quitBundleIDs {
+            for app in NSWorkspace.shared.runningApplications where app.bundleIdentifier == bundleID {
+                app.terminate()
+            }
+        }
     }
 
     func setFanBoostEnabled(_ enabled: Bool) {
@@ -815,6 +851,7 @@ struct MenuBarPanel: View {
             cursorCard(report)
             buildPulseCard
             projectCard
+            focusModeCard
         }
     }
 
@@ -1048,6 +1085,43 @@ struct MenuBarPanel: View {
                 Text(project.chipText)
                     .font(.caption.weight(.semibold).monospacedDigit())
                 Text(project.detailText)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+    }
+
+    private var focusModeCard: some View {
+        ControlCenterCard {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "target")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text("FOCUS")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                }
+                HStack(spacing: 6) {
+                    ForEach([FocusMode.ship, .meet, .battery], id: \.self) { mode in
+                        let selected = model.focusMode == mode
+                        Button {
+                            model.applyFocusMode(selected ? .off : mode)
+                        } label: {
+                            Text(mode.title)
+                                .font(.caption.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 6)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .fill(selected ? Color.accentColor.opacity(0.22) : Color.primary.opacity(0.06))
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                Text(model.focusMode.detail)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
