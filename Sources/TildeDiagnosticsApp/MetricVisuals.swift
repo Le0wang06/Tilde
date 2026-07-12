@@ -171,6 +171,60 @@ struct LiveResourceChart: View {
     }
 }
 
+/// Single-metric sparkline for compact menu-bar cards (CPU only).
+struct CompactCPUSparkline: View {
+    let samples: [LiveMetricSample]
+    var tint: Color = .blue
+
+    private var points: [(Date, Double)] {
+        samples.compactMap { sample in
+            guard let cpu = sample.cpuPercent else { return nil }
+            return (sample.timestamp, cpu)
+        }
+    }
+
+    var body: some View {
+        let values = points
+        Chart(values, id: \.0) { item in
+            AreaMark(
+                x: .value("Time", item.0),
+                y: .value("CPU", item.1)
+            )
+            .foregroundStyle(
+                LinearGradient(
+                    colors: [tint.opacity(0.28), tint.opacity(0.02)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+            .interpolationMethod(.catmullRom)
+
+            LineMark(
+                x: .value("Time", item.0),
+                y: .value("CPU", item.1)
+            )
+            .foregroundStyle(tint)
+            .lineStyle(StrokeStyle(lineWidth: 1.75, lineCap: .round, lineJoin: .round))
+            .interpolationMethod(.catmullRom)
+        }
+        .chartYScale(domain: 0...100)
+        .chartXAxis(.hidden)
+        .chartYAxis(.hidden)
+        .chartLegend(.hidden)
+        .chartPlotStyle { plot in
+            plot.padding(0)
+        }
+        .accessibilityLabel("CPU history")
+        .accessibilityHidden(values.isEmpty)
+        .overlay {
+            if values.isEmpty {
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(Color.primary.opacity(0.04))
+            }
+        }
+    }
+}
+
 struct LiveNetworkChart: View {
     let samples: [LiveMetricSample]
 
