@@ -134,13 +134,16 @@ final class DiagnosticViewModel: ObservableObject {
     @Published private(set) var menuBarTitle: String = "~ …"
     @Published private(set) var fanBoost: FanBoostController.Snapshot = .idle
     @Published private(set) var buildPulse = BuildPulseSnapshot()
+    @Published private(set) var slowdown = SlowdownAdvice.none
     private let liveMonitoring = LiveMonitoringService()
     private let fanBoostController = FanBoostController()
     private let buildPulseMonitor = BuildPulseMonitor()
+    private let slowdownNotifier = SlowdownNotifier()
     private var historyBuffer = LiveMetricHistory()
     private var subscriptionTask: Task<Void, Never>?
     private var buildPulseTask: Task<Void, Never>?
     private var speedWriteTask: Task<Void, Never>?
+    private var didAskNotificationAuth = false
     private let menuBarPresentationID = UUID()
 
     var menuBarSymbol: String {
@@ -183,7 +186,12 @@ final class DiagnosticViewModel: ObservableObject {
                 let snapshot = await self.buildPulseMonitor.snapshot()
                 self.buildPulse = snapshot
                 if let report = self.report {
-                    self.publishMenuBarTitle(codex: report.codex, cursor: report.cursor, build: snapshot)
+                    self.publishMenuBarTitle(
+                        codex: report.codex,
+                        cursor: report.cursor,
+                        build: snapshot,
+                        slowdown: self.slowdown
+                    )
                 }
                 try? await Task.sleep(for: .seconds(2))
             }
@@ -194,7 +202,19 @@ final class DiagnosticViewModel: ObservableObject {
         self.report = report
         historyBuffer.append(LiveMetricSample(snapshot: report.system))
         history = historyBuffer.samples
-        publishMenuBarTitle(codex: report.codex, cursor: report.cursor, build: buildPulse)
+        let advice = SlowdownAdvisor.advice(from: report.system)
+        slowdown = advice
+        if !didAskNotificationAuth, advice.severity != .none {
+            didAskNotificationAuth = true
+            slowdownNotifier.requestAuthorizationIfNeeded()
+        }
+        slowdownNotifier.postIfNeeded(advice)
+        publishMenuBarTitle(
+            codex: report.codex,
+            cursor: report.cursor,
+            build: buildPulse,
+            slowdown: advice
+        )
         if fanBoost.isEnabled {
             Task {
                 let snapshot = await fanBoostController.currentSnapshot(thermalState: report.system.thermalState)
@@ -207,9 +227,10 @@ final class DiagnosticViewModel: ObservableObject {
     private func publishMenuBarTitle(
         codex: Availability<CodexDiagnosticSnapshot>,
         cursor: Availability<CursorUsageSnapshot>,
-        build: BuildPulseSnapshot
+        build: BuildPulseSnapshot,
+        slowdown: SlowdownAdvice
     ) {
-        menuBarTitle = Self.makeMenuBarTitle(from: codex, cursor: cursor, build: build)
+        menuBarTitle = Self.makeMenuBarTitle(from: codex, cursor: cursor, build: build, slowdown: slowdown)
         MenuBarStatusItemController.shared.updateTitle(menuBarTitle)
         NotificationCenter.default.post(
             name: .tildeMenuBarTitleDidChange,
@@ -221,7 +242,8 @@ final class DiagnosticViewModel: ObservableObject {
     private static func makeMenuBarTitle(
         from codex: Availability<CodexDiagnosticSnapshot>,
         cursor: Availability<CursorUsageSnapshot>,
-        build: BuildPulseSnapshot
+        build: BuildPulseSnapshot,
+        slowdown: SlowdownAdvice
     ) -> String {
         let cx: String
         if case .available(let snapshot) = codex, let remaining = snapshot.primaryLimit?.remainingPercent {
@@ -242,6 +264,14 @@ final class DiagnosticViewModel: ObservableObject {
             title += " · ⚒"
         } else if build.phase == .finished {
             title += " · ✓"
+        }
+        switch slowdown.severity {
+        case .critical:
+            title += " · !!"
+        case .warn:
+            title += " · !"
+        case .none:
+            break
         }
         return title
     }
@@ -651,6 +681,9 @@ struct MenuBarPanel: View {
     var body: some View {
         VStack(spacing: 10) {
             header
+            if model.slowdown.severity != .none {
+                slowdownBanner
+            }
 
             if let report = model.report {
                 metricGrid(report)
@@ -698,6 +731,29 @@ struct MenuBarPanel: View {
         }
         .padding(.horizontal, 4)
         .padding(.top, 2)
+    }
+
+    private var slowdownBanner: some View {
+        let advice = model.slowdown
+        let tint: Color = advice.severity == .critical ? .red : .orange
+        return HStack(alignment: .top, spacing: 8) {
+            Image(systemName: advice.severity == .critical ? "exclamationmark.triangle.fill" : "thermometer.medium")
+                .foregroundStyle(tint)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(advice.title)
+                    .font(.caption.weight(.semibold))
+                Text(advice.detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(tint.opacity(0.12))
+        )
     }
 
     @ViewBuilder
