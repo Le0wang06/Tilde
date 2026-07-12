@@ -1097,9 +1097,8 @@ struct MenuBarPanel: View {
 
     private var attentionCard: some View {
         let attention = model.agentAttention.attentionItems
-        let visible = attention.isEmpty
-            ? Array(model.agentAttention.agents.filter { $0.state == .working }.prefix(2))
-            : Array(attention.prefix(3))
+        let available = model.agentAttention.displayItems
+        let visible = Array(available.prefix(4))
 
         return ControlCenterCard {
             VStack(alignment: .leading, spacing: 6) {
@@ -1107,7 +1106,7 @@ struct MenuBarPanel: View {
                     Image(systemName: attention.isEmpty ? "sparkles" : "exclamationmark.bubble.fill")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(attention.isEmpty ? Color.secondary : Color.orange)
-                    Text(attention.isEmpty ? "AGENTS · WORKING" : "AGENTS · NEED YOU")
+                    Text(attention.isEmpty ? "AGENTS · AVAILABLE" : "AGENTS · NEED YOU")
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -1144,8 +1143,8 @@ struct MenuBarPanel: View {
                     .help("Focus this agent in Herdr")
                 }
 
-                if visible.isEmpty {
-                    Text("All agents are idle")
+                if available.count > visible.count {
+                    Text("+\(available.count - visible.count) more available")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
