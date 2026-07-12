@@ -94,6 +94,10 @@ private actor FakeLiveCoordinator: LiveDiagnosticCoordinating {
         .unavailable(reason: "Not sampled")
     }
 
+    func runCursorDiagnostics() async -> Availability<CursorUsageSnapshot> {
+        .unavailable(reason: "Not sampled")
+    }
+
     func systemSampleCount() -> Int {
         samples
     }

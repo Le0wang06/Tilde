@@ -9,6 +9,7 @@ public actor MonitoringCoordinator {
     private let thermalProvider: ThermalProvider
     private let sensorProvider: StubAdvancedSensorProvider
     private let codexProvider: CodexAppServerProbe
+    private let cursorProvider: CursorUsageProbe
 
     public init(
         cpuProvider: CPUProvider = CPUProvider(),
@@ -18,7 +19,8 @@ public actor MonitoringCoordinator {
         batteryProvider: BatteryProvider = BatteryProvider(),
         thermalProvider: ThermalProvider = ThermalProvider(),
         sensorProvider: StubAdvancedSensorProvider = StubAdvancedSensorProvider(),
-        codexProvider: CodexAppServerProbe = CodexAppServerProbe()
+        codexProvider: CodexAppServerProbe = CodexAppServerProbe(),
+        cursorProvider: CursorUsageProbe = CursorUsageProbe()
     ) {
         self.cpuProvider = cpuProvider
         self.memoryProvider = memoryProvider
@@ -28,20 +30,26 @@ public actor MonitoringCoordinator {
         self.thermalProvider = thermalProvider
         self.sensorProvider = sensorProvider
         self.codexProvider = codexProvider
+        self.cursorProvider = cursorProvider
     }
 
     public func runDiagnostics() async -> DiagnosticReport {
         async let system = runSystemDiagnostics()
         async let codex = runCodexDiagnostics()
-        return await DiagnosticReport(system: system, codex: codex)
+        async let cursor = runCursorDiagnostics()
+        return await DiagnosticReport(system: system, codex: codex, cursor: cursor)
     }
 
     public func runSystemDiagnostics() async -> SystemSnapshot {
-        await sampleSystem(previous: nil, metrics: Set(LiveMetric.allCases.filter { $0 != .codex }))
+        await sampleSystem(previous: nil, metrics: Set(LiveMetric.allCases.filter { $0 != .codex && $0 != .cursor }))
     }
 
     public func runCodexDiagnostics() async -> Availability<CodexDiagnosticSnapshot> {
         await capture { try await self.codexProvider.fetchSnapshot() }
+    }
+
+    public func runCursorDiagnostics() async -> Availability<CursorUsageSnapshot> {
+        await capture { try await self.cursorProvider.fetchSnapshot() }
     }
 
     public func sampleSystem(previous: SystemSnapshot?, metrics: Set<LiveMetric>) async -> SystemSnapshot {
