@@ -127,7 +127,6 @@ enum ReadmeAssetCapture {
         NSColor(calibratedWhite: 0.11, alpha: 1).setFill()
         NSBezierPath(rect: NSRect(origin: .zero, size: size)).fill()
 
-        // Subtle bottom edge like the real menu bar.
         NSColor.white.withAlphaComponent(0.08).setStroke()
         let edge = NSBezierPath()
         edge.move(to: NSPoint(x: 0, y: 0.5))
@@ -142,7 +141,7 @@ enum ReadmeAssetCapture {
         ]
         apple.draw(at: NSPoint(x: 16, y: 16), withAttributes: appleAttrs)
 
-        let left = "TildeDiagnostics" as NSString
+        let left = "Tilde" as NSString
         let leftAttrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 13, weight: .semibold),
             .foregroundColor: NSColor.white.withAlphaComponent(0.9),
@@ -159,10 +158,13 @@ enum ReadmeAssetCapture {
         let trailSize = trailing.size(withAttributes: trailAttrs)
         let trailingX = size.width - trailSize.width - 16
 
-        let display = (title.isEmpty ? "~ …" : title) as NSString
+        let display = (title.isEmpty ? "$—" : title) as NSString
+        let needsAttention = (title as NSString).contains("!")
         let titleAttrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .semibold),
-            .foregroundColor: NSColor.white.withAlphaComponent(0.95),
+            .foregroundColor: needsAttention
+                ? NSColor.systemOrange
+                : NSColor.white.withAlphaComponent(0.95),
         ]
         let titleSize = display.size(withAttributes: titleAttrs)
         display.draw(
@@ -183,38 +185,86 @@ enum ReadmeAssetCapture {
         let size = NSSize(width: 1600, height: 900)
         let image = NSImage(size: size)
         image.lockFocus()
-        NSColor(calibratedWhite: 0.08, alpha: 1).setFill()
-        NSBezierPath(rect: NSRect(origin: .zero, size: size)).fill()
 
-        let tilde = "~" as NSString
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 120, weight: .semibold),
-            .foregroundColor: NSColor.white.withAlphaComponent(0.92),
+        // Soft charcoal → slate wash (not flat, not purple).
+        if let gradient = NSGradient(colors: [
+            NSColor(calibratedRed: 0.07, green: 0.08, blue: 0.10, alpha: 1),
+            NSColor(calibratedRed: 0.12, green: 0.13, blue: 0.15, alpha: 1),
+            NSColor(calibratedRed: 0.08, green: 0.09, blue: 0.11, alpha: 1),
+        ]) {
+            gradient.draw(in: NSRect(origin: .zero, size: size), angle: 125)
+        }
+
+        // Quiet grid texture.
+        NSColor.white.withAlphaComponent(0.03).setStroke()
+        let grid = NSBezierPath()
+        grid.lineWidth = 1
+        for x in stride(from: 0.0, through: size.width, by: 48) {
+            grid.move(to: NSPoint(x: x, y: 0))
+            grid.line(to: NSPoint(x: x, y: size.height))
+        }
+        for y in stride(from: 0.0, through: size.height, by: 48) {
+            grid.move(to: NSPoint(x: 0, y: y))
+            grid.line(to: NSPoint(x: size.width, y: y))
+        }
+        grid.stroke()
+
+        let logo = loadLogoImage()
+        let logoSide: CGFloat = 96
+        let brandX: CGFloat = 96
+        let brandY = size.height * 0.58
+        if let logo {
+            logo.draw(
+                in: NSRect(x: brandX, y: brandY, width: logoSide, height: logoSide),
+                from: .zero,
+                operation: .sourceOver,
+                fraction: 1
+            )
+        } else {
+            let tilde = "~" as NSString
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 92, weight: .semibold),
+                .foregroundColor: NSColor.white.withAlphaComponent(0.95),
+            ]
+            tilde.draw(at: NSPoint(x: brandX, y: brandY + 8), withAttributes: attrs)
+        }
+
+        let name = "Tilde" as NSString
+        let nameAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 64, weight: .semibold),
+            .foregroundColor: NSColor.white.withAlphaComponent(0.96),
         ]
-        let textSize = tilde.size(withAttributes: attrs)
-        tilde.draw(
-            at: NSPoint(x: (size.width - textSize.width) / 2, y: size.height * 0.62),
-            withAttributes: attrs
-        )
+        name.draw(at: NSPoint(x: brandX, y: brandY - 78), withAttributes: nameAttrs)
 
-        let caption = "menu-bar command center" as NSString
+        let caption = "Menu-bar command center for agents & machines" as NSString
         let capAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 28, weight: .medium),
+            .font: NSFont.systemFont(ofSize: 24, weight: .medium),
             .foregroundColor: NSColor.white.withAlphaComponent(0.55),
         ]
-        let capSize = caption.size(withAttributes: capAttrs)
-        caption.draw(
-            at: NSPoint(x: (size.width - capSize.width) / 2, y: size.height * 0.52),
-            withAttributes: capAttrs
-        )
+        caption.draw(at: NSPoint(x: brandX, y: brandY - 120), withAttributes: capAttrs)
 
-        let maxPanelHeight = size.height * 0.72
-        let scale = min(360 / panel.size.width, maxPanelHeight / panel.size.height)
+        let maxPanelHeight = size.height * 0.78
+        let scale = min(380 / panel.size.width, maxPanelHeight / panel.size.height)
         let drawSize = NSSize(width: panel.size.width * scale, height: panel.size.height * scale)
         let origin = NSPoint(
-            x: size.width - drawSize.width - 80,
+            x: size.width - drawSize.width - 72,
             y: (size.height - drawSize.height) / 2
         )
+
+        // Soft panel shadow.
+        NSColor.black.withAlphaComponent(0.35).setFill()
+        let shadow = NSBezierPath(
+            roundedRect: NSRect(
+                x: origin.x + 10,
+                y: origin.y - 12,
+                width: drawSize.width,
+                height: drawSize.height
+            ),
+            xRadius: 18,
+            yRadius: 18
+        )
+        shadow.fill()
+
         panel.draw(
             in: NSRect(origin: origin, size: drawSize),
             from: .zero,
@@ -223,6 +273,19 @@ enum ReadmeAssetCapture {
         )
         image.unlockFocus()
         writePNG(image, to: url)
+    }
+
+    private static func loadLogoImage() -> NSImage? {
+        let root = findRepoRoot()
+        let candidates = [
+            root.appendingPathComponent("Docs/assets/tilde-logo.png"),
+            root.appendingPathComponent("Sources/TildeDiagnosticsApp/Resources/tilde-logo.png"),
+            Bundle.main.url(forResource: "tilde-logo", withExtension: "png"),
+        ].compactMap { $0 }
+        for url in candidates {
+            if let image = NSImage(contentsOf: url) { return image }
+        }
+        return nil
     }
 
     private static func findRepoRoot() -> URL {
