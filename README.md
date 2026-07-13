@@ -32,7 +32,7 @@ Tilde lives in your menu bar and answers four questions without stealing focus:
 | ---: | --- | --- |
 | **1** | What needs me? | Blocked / ready Herdr agents, ordered by attention |
 | **2** | What changed? | Branch, dirty state, ahead/behind, project context |
-| **3** | Is it safe? | Deterministic Git · build · CI trust evidence |
+| **3** | What evidence exists? | Git · build · CI signals, with exact receipts on the roadmap |
 | **4** | Where do I resume? | Private recovery capsule per project |
 
 Editors edit. Herdr runs agents. **Tilde is the ambient layer between them.**
@@ -71,7 +71,7 @@ Re-capture anytime with:
 | **Fan Boost** | Real SMC fan control via `tilde-fan` (admin password once per login) |
 | **AI budget** | Codex ⇄ Cursor remaining % in one tap-to-cycle card |
 | **Agent attention** | Herdr inventory, blockers first, one-click focus back to the terminal |
-| **Trust packet** | Deterministic Git / build / CI evidence — no opaque “AI confidence” |
+| **Trust packet** | Prototype Git / build / CI signals — no opaque “AI confidence” |
 | **Recovery** | Per-project capsule (metadata only) so you can resume cleanly |
 | **Focus modes** | Ship · Meet · Battery presets |
 | **Today diary** | Local JSONL of builds, focus, slowdowns, agent events |
@@ -173,13 +173,16 @@ Recovery capsules keep only path, branch, attention counts, verification state, 
 
 ## Docs
 
+- [Making Tilde genuinely useful](Docs/Tilde-Usefulness-Study.md) — research, market audit, product decision, and phased roadmap
 - [AI Control Plane](Docs/AI-Control-Plane.md) — promise, shipped slice, next steps  
 - [Phase 0 Feasibility](Docs/Phase-0-Feasibility.md) — measured results and limits  
 - [Contribution workflow](AGENTS.md)
 
 ## Status
 
-Phase 0 diagnostics are solid. The AI attention / verification slice is in active dogfooding. Release gates: idle CPU, no notification spam on launch, low false blocked/done rates — details in the control-plane doc.
+Phase 0 diagnostics are solid. Research now points to a change-centered decision queue with exact,
+fingerprint-bound verification receipts. The current trust packet is a prototype and must not be
+treated as proof until the Phase 0 truthfulness gates in the product study pass.
 
 ---
 
