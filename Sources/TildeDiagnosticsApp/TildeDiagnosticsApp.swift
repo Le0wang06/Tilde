@@ -13,7 +13,9 @@ struct TildeDiagnosticsApp: App {
         Task { @MainActor in
             model.startIfNeeded()
             TildeAppDelegate.shared?.model = model
+            AttentionBannerCenter.shared.install(model: model)
             MenuBarStatusItemController.shared.install(model: model)
+            AttentionBannerSmokeTest.runIfRequested(model: model)
             ReadmeAssetCapture.runIfRequested(model: model)
         }
     }
@@ -43,6 +45,7 @@ final class TildeAppDelegate: NSObject, NSApplicationDelegate {
         Self.shared = self
         // Stay in the menu bar only — don't steal focus or pop the main window.
         NSApp.setActivationPolicy(.accessory)
+        AppIconSupport.applyApplicationIcon()
         DispatchQueue.main.async {
             for window in NSApp.windows where window.isVisible {
                 window.orderOut(nil)
@@ -335,7 +338,11 @@ final class DiagnosticViewModel: ObservableObject {
                 let refresh = await self.agentAttentionMonitor.refresh()
                 if !self.freezeIdentityForReadmeCapture {
                     self.agentAttention = refresh.snapshot
-                    self.agentAttentionNotifier.post(refresh.events)
+                    self.agentAttentionNotifier.post(
+                        refresh.events,
+                        logoAttachment: AppIconSupport.makeLogoAttachment()
+                    )
+                    AttentionSoundPlayer.play(for: refresh.events)
                     for event in refresh.events {
                         self.recordDiary(.init(
                             kind: event.kind == .needsInput ? .agentNeedsInput : .agentCompleted,
@@ -354,7 +361,11 @@ final class DiagnosticViewModel: ObservableObject {
                         focus: self.focusMode
                     )
                 }
-                try? await Task.sleep(for: .seconds(2))
+                // Poll faster while an agent is working so short Q&A turns
+                // aren't missed between samples (Herdr flips working→idle quickly).
+                try? await Task.sleep(
+                    for: .milliseconds(refresh.snapshot.workingCount > 0 ? 500 : 2000)
+                )
             }
         }
     }
@@ -538,8 +549,8 @@ final class DiagnosticViewModel: ObservableObject {
             lastEventSummary: "Focus · Ship"
         )
 
-        menuBarTitle = "≈$4.38"
-        MenuBarStatusItemController.shared.updateTitle(menuBarTitle)
+        menuBarTitle = "! ≈$4.38"
+        MenuBarStatusItemController.shared.updateTitle(menuBarTitle, needsAttention: true)
     }
 
     private func apply(report: DiagnosticReport) {
@@ -587,27 +598,36 @@ final class DiagnosticViewModel: ObservableObject {
         project: ProjectContextSnapshot,
         focus: FocusMode
     ) {
+        let needsAttention = agentAttention.attentionCount > 0
         menuBarTitle = Self.makeMenuBarTitle(
             from: codex,
-            cursor: cursor
+            cursor: cursor,
+            needsAttention: needsAttention
         )
-        MenuBarStatusItemController.shared.updateTitle(menuBarTitle)
+        MenuBarStatusItemController.shared.updateTitle(menuBarTitle, needsAttention: needsAttention)
         NotificationCenter.default.post(
             name: .tildeMenuBarTitleDidChange,
             object: nil,
-            userInfo: ["title": menuBarTitle]
+            userInfo: [
+                "title": menuBarTitle,
+                "needsAttention": needsAttention,
+            ]
         )
     }
 
     private static func makeMenuBarTitle(
         from codex: Availability<CodexDiagnosticSnapshot>,
-        cursor: Availability<CursorUsageSnapshot>
+        cursor: Availability<CursorUsageSnapshot>,
+        needsAttention: Bool = false
     ) -> String {
         let spend = DailyAISpendSummary(
             codex: codex.availableValue?.dailySpend,
             cursor: cursor.availableValue?.dailySpend
         )
-        return spend.menuBarText
+        return MenuBarAttentionTitle.compose(
+            spendText: spend.menuBarText,
+            needsAttention: needsAttention
+        )
     }
 
     func applyFocusMode(_ mode: FocusMode) {
