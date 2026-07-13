@@ -538,7 +538,7 @@ final class DiagnosticViewModel: ObservableObject {
             lastEventSummary: "Focus · Ship"
         )
 
-        menuBarTitle = "≈$4.38+"
+        menuBarTitle = "≈$4.38"
         MenuBarStatusItemController.shared.updateTitle(menuBarTitle)
     }
 
