@@ -149,17 +149,6 @@ enum ReadmeAssetCapture {
         ]
         left.draw(at: NSPoint(x: 40, y: 16), withAttributes: leftAttrs)
 
-        let display = (title.isEmpty ? "~ …" : title) as NSString
-        let titleAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .semibold),
-            .foregroundColor: NSColor.white.withAlphaComponent(0.95),
-        ]
-        let titleSize = display.size(withAttributes: titleAttrs)
-        display.draw(
-            at: NSPoint(x: size.width - titleSize.width - 120, y: 16),
-            withAttributes: titleAttrs
-        )
-
         let formatter = DateFormatter()
         formatter.dateFormat = "EEE  MMM d  h:mm a"
         let trailing = formatter.string(from: Date()) as NSString
@@ -168,8 +157,21 @@ enum ReadmeAssetCapture {
             .foregroundColor: NSColor.white.withAlphaComponent(0.75),
         ]
         let trailSize = trailing.size(withAttributes: trailAttrs)
+        let trailingX = size.width - trailSize.width - 16
+
+        let display = (title.isEmpty ? "~ …" : title) as NSString
+        let titleAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .semibold),
+            .foregroundColor: NSColor.white.withAlphaComponent(0.95),
+        ]
+        let titleSize = display.size(withAttributes: titleAttrs)
+        display.draw(
+            at: NSPoint(x: trailingX - titleSize.width - 24, y: 16),
+            withAttributes: titleAttrs
+        )
+
         trailing.draw(
-            at: NSPoint(x: size.width - trailSize.width - 16, y: 17),
+            at: NSPoint(x: trailingX, y: 17),
             withAttributes: trailAttrs
         )
 

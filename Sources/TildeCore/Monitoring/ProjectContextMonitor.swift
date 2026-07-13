@@ -22,6 +22,7 @@ public struct ProjectContextSnapshot: Sendable, Equatable {
     public var projectName: String?
     public var rootPath: String?
     public var branch: String?
+    public var headOID: String?
     public var isDirty: Bool
     public var ahead: Int?
     public var behind: Int?
@@ -32,6 +33,7 @@ public struct ProjectContextSnapshot: Sendable, Equatable {
         projectName: String? = nil,
         rootPath: String? = nil,
         branch: String? = nil,
+        headOID: String? = nil,
         isDirty: Bool = false,
         ahead: Int? = nil,
         behind: Int? = nil,
@@ -41,6 +43,7 @@ public struct ProjectContextSnapshot: Sendable, Equatable {
         self.projectName = projectName
         self.rootPath = rootPath
         self.branch = branch
+        self.headOID = headOID
         self.isDirty = isDirty
         self.ahead = ahead
         self.behind = behind
@@ -76,7 +79,7 @@ public struct ProjectContextSnapshot: Sendable, Equatable {
 /// Resolves the active developer project and reads git / optional CI status.
 public actor ProjectContextMonitor {
     private var lastCIFetchAt: Date?
-    private var cachedCI: (root: String, status: ProjectCIStatus, summary: String?)?
+    private var cachedCI: (root: String, headOID: String?, status: ProjectCIStatus, summary: String?)?
 
     public init() {}
 
@@ -88,6 +91,8 @@ public actor ProjectContextMonitor {
 
         let name = URL(fileURLWithPath: root).lastPathComponent
         let branch = Self.runGit(["rev-parse", "--abbrev-ref", "HEAD"], in: root)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let headOID = Self.runGit(["rev-parse", "HEAD"], in: root)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let porcelain = Self.runGit(["status", "--porcelain"], in: root) ?? ""
         let isDirty = !porcelain.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -105,11 +110,12 @@ public actor ProjectContextMonitor {
             }
         }
 
-        let ci = await refreshCIIfNeeded(root: root)
+        let ci = await refreshCIIfNeeded(root: root, headOID: headOID)
         return ProjectContextSnapshot(
             projectName: name,
             rootPath: root,
             branch: (branch?.isEmpty == false) ? branch : nil,
+            headOID: (headOID?.isEmpty == false) ? headOID : nil,
             isDirty: isDirty,
             ahead: ahead,
             behind: behind,
@@ -118,15 +124,15 @@ public actor ProjectContextMonitor {
         )
     }
 
-    private func refreshCIIfNeeded(root: String) async -> (status: ProjectCIStatus, summary: String?) {
-        if let cached = cachedCI, cached.root == root,
+    private func refreshCIIfNeeded(root: String, headOID: String?) async -> (status: ProjectCIStatus, summary: String?) {
+        if let cached = cachedCI, cached.root == root, cached.headOID == headOID,
            let last = lastCIFetchAt, Date().timeIntervalSince(last) < 45 {
             return (cached.status, cached.summary)
         }
 
-        let result = await Self.fetchCIStatus(in: root)
+        let result = await Self.fetchCIStatus(in: root, headOID: headOID)
         lastCIFetchAt = Date()
-        cachedCI = (root, result.status, result.summary)
+        cachedCI = (root, headOID, result.status, result.summary)
         return result
     }
 
@@ -269,7 +275,11 @@ public actor ProjectContextMonitor {
         return String(data: data, encoding: .utf8)
     }
 
-    private static func fetchCIStatus(in root: String) async -> (status: ProjectCIStatus, summary: String?) {
+    private static func fetchCIStatus(
+        in root: String,
+        headOID: String?
+    ) async -> (status: ProjectCIStatus, summary: String?) {
+        guard let headOID, !headOID.isEmpty else { return (.unknown, "No current commit") }
         let ghCandidates = ["/opt/homebrew/bin/gh", "/usr/local/bin/gh"]
         guard let gh = ghCandidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
             return (.unknown, nil)
@@ -279,8 +289,9 @@ public actor ProjectContextMonitor {
         proc.executableURL = URL(fileURLWithPath: gh)
         proc.arguments = [
             "run", "list",
+            "--commit", headOID,
             "--limit", "1",
-            "--json", "conclusion,status,name,displayTitle,headBranch",
+            "--json", "conclusion,status,name,displayTitle,headBranch,headSha,url",
         ]
         proc.currentDirectoryURL = URL(fileURLWithPath: root)
         let out = Pipe()
@@ -295,9 +306,19 @@ public actor ProjectContextMonitor {
             return (.unknown, nil)
         }
         guard proc.terminationStatus == 0 else { return (.unknown, nil) }
+        return parseCIStatus(data, matchingHead: headOID)
+    }
+
+    static func parseCIStatus(
+        _ data: Data,
+        matchingHead headOID: String
+    ) -> (status: ProjectCIStatus, summary: String?) {
         guard let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
               let first = rows.first else {
-            return (.unknown, "No recent CI")
+            return (.unknown, "No CI for current commit")
+        }
+        guard (first["headSha"] as? String) == headOID else {
+            return (.unknown, "No CI for current commit")
         }
 
         let statusRaw = (first["status"] as? String)?.lowercased() ?? ""

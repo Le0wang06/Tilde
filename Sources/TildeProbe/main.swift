@@ -38,7 +38,10 @@ struct TildeProbe {
 
         if case .available(let codex) = report.codex {
             print("Codex Authentication  \(codex.isAuthenticated ? "Working" : "Required")")
-            print("Codex Usage           \(codex.primaryLimit == nil ? "Unavailable" : "Working")")
+            print("Codex Usage           \(codex.rateLimitWindows.isEmpty ? "Unavailable" : "Working")")
+            for window in codex.rateLimitWindows {
+                print("Codex \(window.kind.compactLabel) Window   \(window.remainingPercent)% left")
+            }
             print("Codex Tokens Today    \(codex.tokensToday == nil ? "Unavailable" : "Working")")
             print("Codex Threads         \(codex.threadCount == nil ? "Unavailable" : "Working")")
             for note in codex.notes {

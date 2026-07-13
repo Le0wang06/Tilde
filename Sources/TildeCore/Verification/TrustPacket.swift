@@ -9,9 +9,9 @@ public enum TrustPacketState: String, Sendable, Equatable {
     public var label: String {
         switch self {
         case .unavailable: return "No project"
-        case .verifying: return "Verifying"
-        case .needsVerification: return "Needs verification"
-        case .ready: return "Evidence ready"
+        case .verifying: return "Matching checks running"
+        case .needsVerification: return "Review needed"
+        case .ready: return "No change detected"
         }
     }
 }
@@ -21,6 +21,7 @@ public enum TrustRiskKind: String, Codable, Sendable, Equatable {
     case sensitiveFiles
     case buildUnknown
     case buildFailed
+    case ciUnknown
     case ciPending
     case ciFailed
     case branchBehind
@@ -43,6 +44,8 @@ public struct TrustPacketSnapshot: Sendable, Equatable {
     public var changedFiles: Int
     public var additions: Int
     public var deletions: Int
+    public var untrackedFiles: Int
+    public var comparisonBase: String?
     public var risks: [TrustRisk]
     public var sampledAt: Date
 
@@ -52,6 +55,8 @@ public struct TrustPacketSnapshot: Sendable, Equatable {
         changedFiles: Int = 0,
         additions: Int = 0,
         deletions: Int = 0,
+        untrackedFiles: Int = 0,
+        comparisonBase: String? = nil,
         risks: [TrustRisk] = [],
         sampledAt: Date = Date()
     ) {
@@ -60,6 +65,8 @@ public struct TrustPacketSnapshot: Sendable, Equatable {
         self.changedFiles = changedFiles
         self.additions = additions
         self.deletions = deletions
+        self.untrackedFiles = untrackedFiles
+        self.comparisonBase = comparisonBase
         self.risks = risks
         self.sampledAt = sampledAt
     }
@@ -68,10 +75,15 @@ public struct TrustPacketSnapshot: Sendable, Equatable {
 
     public var summary: String {
         guard projectRoot != nil else { return state.label }
-        if changedFiles == 0 { return "Clean · no local changes" }
+        if changedFiles == 0 {
+            if risks.isEmpty { return "No change detected" }
+            return "\(risks.count) check\(risks.count == 1 ? "" : "s") needed"
+        }
+        let scope = comparisonBase.map { " vs \($0)" } ?? ""
         let delta = "+\(additions) −\(deletions)"
-        if risks.isEmpty { return "\(changedFiles) files · \(delta)" }
-        return "\(risks.count) check\(risks.count == 1 ? "" : "s") · \(changedFiles) files"
+        let untracked = untrackedFiles > 0 ? " · \(untrackedFiles) untracked" : ""
+        if risks.isEmpty { return "\(changedFiles) files\(scope) · \(delta)\(untracked)" }
+        return "\(risks.count) check\(risks.count == 1 ? "" : "s") · \(changedFiles) files\(scope)"
     }
 }
 
@@ -89,12 +101,27 @@ public actor TrustPacketProvider {
         let statusLines = Self.git(["status", "--porcelain"], in: rootPath)?
             .split(separator: "\n")
             .map(String.init) ?? []
-        let numstat = [
-            Self.git(["diff", "--numstat"], in: rootPath),
-            Self.git(["diff", "--cached", "--numstat"], in: rootPath),
-        ].compactMap { $0 }.joined(separator: "\n")
+        let comparison = Self.comparisonBase(in: rootPath)
+        let numstat: String
+        let trackedPaths: [String]
+        if let startOID = comparison?.startOID {
+            numstat = Self.git(["diff", "--numstat", startOID], in: rootPath) ?? ""
+            trackedPaths = Self.nullSeparatedPaths(
+                Self.git(["diff", "--name-only", "-z", startOID], in: rootPath) ?? ""
+            )
+        } else {
+            numstat = [
+                Self.git(["diff", "--numstat"], in: rootPath),
+                Self.git(["diff", "--cached", "--numstat"], in: rootPath),
+            ].compactMap { $0 }.joined(separator: "\n")
+            trackedPaths = statusLines.compactMap(Self.pathFromPorcelain)
+        }
+        let untrackedPaths = Self.nullSeparatedPaths(
+            Self.git(["ls-files", "--others", "--exclude-standard", "-z"], in: rootPath) ?? ""
+        )
         let delta = Self.parseNumstat(numstat)
-        let paths = Set(statusLines.compactMap(Self.pathFromPorcelain))
+        let paths = Set(trackedPaths + untrackedPaths)
+        let hasWorkingChanges = !statusLines.isEmpty
         var risks: [TrustRisk] = []
 
         if delta.additions + delta.deletions > 500 || paths.count > 20 {
@@ -107,34 +134,54 @@ public actor TrustPacketProvider {
                 message: "Sensitive configuration or dependency files changed"
             ))
         }
-        switch build.phase {
-        case .running:
-            break
-        case .finished where build.lastSucceeded == false:
-            risks.append(TrustRisk(kind: .buildFailed, message: "The last observed build failed"))
-        case .finished where build.lastSucceeded == true:
-            break
-        case .idle, .finished:
-            if !paths.isEmpty {
-                risks.append(TrustRisk(kind: .buildUnknown, message: "No passing build is attached to these changes"))
+        if !paths.isEmpty {
+            switch build.phase {
+            case .finished where build.lastSucceeded == false:
+                risks.append(TrustRisk(kind: .buildFailed, message: "The last observed build failed"))
+            case .finished where build.lastSucceeded == true:
+                risks.append(TrustRisk(
+                    kind: .buildUnknown,
+                    message: "A build passed, but it is not bound to this exact change"
+                ))
+            case .running:
+                risks.append(TrustRisk(
+                    kind: .buildUnknown,
+                    message: "A build is running, but it is not bound to this exact change"
+                ))
+            case .idle, .finished:
+                risks.append(TrustRisk(kind: .buildUnknown, message: "No build result is bound to this exact change"))
             }
         }
-        switch ciStatus {
-        case .failure, .cancelled:
-            risks.append(TrustRisk(kind: .ciFailed, message: "The latest CI run did not pass"))
-        case .pending:
-            risks.append(TrustRisk(kind: .ciPending, message: "CI is still running"))
-        case .success, .unknown:
-            break
+        if !paths.isEmpty {
+            switch ciStatus {
+            case .failure, .cancelled:
+                risks.append(TrustRisk(kind: .ciFailed, message: "CI for the current commit did not pass"))
+            case .pending where hasWorkingChanges:
+                risks.append(TrustRisk(
+                    kind: .ciUnknown,
+                    message: "CI is running for HEAD; local changes are not included"
+                ))
+            case .pending:
+                risks.append(TrustRisk(kind: .ciPending, message: "CI for the current commit is still running"))
+            case .success where hasWorkingChanges:
+                risks.append(TrustRisk(
+                    kind: .ciUnknown,
+                    message: "CI passed for HEAD; local changes are not included"
+                ))
+            case .unknown:
+                risks.append(TrustRisk(kind: .ciUnknown, message: "No CI result matches the current commit"))
+            case .success:
+                break
+            }
         }
         if let behind, behind > 0 {
             risks.append(TrustRisk(kind: .branchBehind, message: "Branch is \(behind) commit\(behind == 1 ? "" : "s") behind upstream"))
         }
 
         let state: TrustPacketState
-        if build.phase == .running || ciStatus == .pending {
+        if !hasWorkingChanges && !paths.isEmpty && ciStatus == .pending {
             state = .verifying
-        } else if paths.isEmpty || risks.isEmpty {
+        } else if risks.isEmpty {
             state = .ready
         } else {
             state = .needsVerification
@@ -146,6 +193,8 @@ public actor TrustPacketProvider {
             changedFiles: paths.count,
             additions: delta.additions,
             deletions: delta.deletions,
+            untrackedFiles: untrackedPaths.count,
+            comparisonBase: comparison?.label,
             risks: risks
         )
     }
@@ -177,6 +226,61 @@ public actor TrustPacketProvider {
             || lower.contains("permission")
             || lower.contains(".github/workflows")
             || lower.contains("deploy")
+    }
+
+    static func nullSeparatedPaths(_ text: String) -> [String] {
+        text.split(separator: "\0").map(String.init)
+    }
+
+    private static func comparisonBase(in root: String) -> (label: String, startOID: String)? {
+        var candidates: [String] = []
+        if let remoteHead = git(
+            ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
+            in: root
+        )?.trimmingCharacters(in: .whitespacesAndNewlines), !remoteHead.isEmpty {
+            candidates.append(remoteHead)
+        }
+        candidates.append(contentsOf: ["origin/main", "origin/master", "main", "master"])
+        if let localBase = localAncestorBase(in: root) {
+            candidates.append(localBase)
+        }
+
+        var seen = Set<String>()
+        for candidate in candidates where seen.insert(candidate).inserted {
+            guard git(["rev-parse", "--verify", "\(candidate)^{commit}"], in: root) != nil,
+                  let mergeBase = git(["merge-base", "HEAD", candidate], in: root)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                  !mergeBase.isEmpty else { continue }
+            return (candidate.replacingOccurrences(of: "origin/", with: ""), mergeBase)
+        }
+
+        guard let head = git(["rev-parse", "--verify", "HEAD^{commit}"], in: root)?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !head.isEmpty else { return nil }
+        return ("HEAD", head)
+    }
+
+    /// Local-only repositories do not record a default branch. Prefer the
+    /// closest local branch that is an ancestor of HEAD instead of silently
+    /// comparing a feature branch with itself.
+    private static func localAncestorBase(in root: String) -> String? {
+        guard let current = git(["rev-parse", "--abbrev-ref", "HEAD"], in: root)?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !current.isEmpty,
+              current != "HEAD" else { return nil }
+        let branches = git(
+            ["for-each-ref", "--format=%(refname:short)", "refs/heads"],
+            in: root
+        )?.split(separator: "\n").map(String.init) ?? []
+
+        return branches
+            .filter { $0 != current && git(["merge-base", "--is-ancestor", $0, "HEAD"], in: root) != nil }
+            .compactMap { branch -> (branch: String, distance: Int)? in
+                guard let raw = git(["rev-list", "--count", "\(branch)..HEAD"], in: root)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                      let distance = Int(raw) else { return nil }
+                return (branch, distance)
+            }
+            .min { $0.distance < $1.distance }?
+            .branch
     }
 
     private static func pathFromPorcelain(_ line: String) -> String? {

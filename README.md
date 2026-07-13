@@ -39,7 +39,7 @@ Editors edit. Herdr runs agents. **Tilde is the ambient layer between them.**
 
 ## Gallery
 
-Live captures from the running app, with personal project/agent names replaced by demo stubs:
+Live captures from the running app, with project/agent identity and account-usage values replaced by demo stubs:
 
 <p align="center">
   <img src="Docs/assets/tilde-menubar.png" alt="Tilde status item in the macOS menu bar" width="920" />

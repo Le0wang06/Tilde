@@ -47,6 +47,51 @@ import Testing
     #expect(CodexRateLimitWindow(usedPercent: -10, resetsAt: nil, durationMinutes: nil).remainingPercent == 100)
 }
 
+@Test func codexRateLimitWindowsAreClassifiedByDurationNotPosition() {
+    let weekly = CodexRateLimitWindow(usedPercent: 12, resetsAt: nil, durationMinutes: 10_080)
+    let fiveHour = CodexRateLimitWindow(usedPercent: 40, resetsAt: nil, durationMinutes: 300)
+    let snapshot = CodexDiagnosticSnapshot(
+        executablePath: "/usr/local/bin/codex",
+        version: "test",
+        isAuthenticated: true,
+        accountType: nil,
+        planType: nil,
+        primaryLimit: weekly,
+        secondaryLimit: fiveHour,
+        tokensToday: nil,
+        lifetimeTokens: nil,
+        threadCount: nil,
+        notes: []
+    )
+
+    #expect(snapshot.primaryLimit?.kind == .weekly)
+    #expect(snapshot.secondaryLimit?.kind == .fiveHour)
+    #expect(snapshot.fiveHourLimit == fiveHour)
+    #expect(snapshot.weeklyLimit == weekly)
+    #expect(snapshot.menuBarLimit == fiveHour)
+}
+
+@Test func codexMenuBarFallsBackToTruthfullyLabeledWeeklyWindow() {
+    let weekly = CodexRateLimitWindow(usedPercent: 1, resetsAt: nil, durationMinutes: 10_080)
+    let snapshot = CodexDiagnosticSnapshot(
+        executablePath: "/usr/local/bin/codex",
+        version: "test",
+        isAuthenticated: true,
+        accountType: nil,
+        planType: nil,
+        primaryLimit: weekly,
+        secondaryLimit: nil,
+        tokensToday: nil,
+        lifetimeTokens: nil,
+        threadCount: nil,
+        notes: []
+    )
+
+    #expect(snapshot.fiveHourLimit == nil)
+    #expect(snapshot.menuBarLimit?.kind == .weekly)
+    #expect(snapshot.menuBarLimit?.kind.compactLabel == "7d")
+}
+
 @Test func codexLocatorIncludesUserLocalPathWithoutShellPath() {
     let candidates = CodexExecutableLocator.candidatePaths(environment: [
         "HOME": "/Users/example",
