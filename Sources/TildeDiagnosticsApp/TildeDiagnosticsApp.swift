@@ -193,6 +193,7 @@ final class DiagnosticViewModel: ObservableObject {
     @Published private(set) var trustPacket = TrustPacketSnapshot.unavailable
     @Published private(set) var verification = VerificationSnapshot.unavailable
     @Published private(set) var recoveryCapsule: RecoveryCapsule?
+    @Published private(set) var decisionQueue = DecisionQueueSnapshot.empty
     private let liveMonitoring = LiveMonitoringService()
     private let fanBoostController = FanBoostController()
     private let buildPulseMonitor = BuildPulseMonitor()
@@ -314,6 +315,7 @@ final class DiagnosticViewModel: ObservableObject {
                         trust: self.trustPacket,
                         build: self.buildPulse
                     )
+                    self.refreshDecisionQueue()
                 }
                 if let report = self.report {
                     self.publishMenuBarTitle(
@@ -343,6 +345,7 @@ final class DiagnosticViewModel: ObservableObject {
                             detail: "\(event.agent.agent) in \(event.agent.cwd)"
                         ))
                     }
+                    self.refreshDecisionQueue()
                 }
                 if let report = self.report {
                     self.publishMenuBarTitle(
@@ -357,6 +360,16 @@ final class DiagnosticViewModel: ObservableObject {
                 try? await Task.sleep(for: .seconds(2))
             }
         }
+    }
+
+    private func refreshDecisionQueue() {
+        decisionQueue = DecisionQueueComposer.compose(
+            project: projectContext,
+            trust: trustPacket,
+            verification: verification,
+            agents: agentAttention,
+            build: buildPulse
+        )
     }
 
     /// Replace personal project/agent paths with anonymous demo labels for README captures.
@@ -540,6 +553,7 @@ final class DiagnosticViewModel: ObservableObject {
 
         menuBarTitle = "≈$4.38"
         MenuBarStatusItemController.shared.updateTitle(menuBarTitle)
+        refreshDecisionQueue()
     }
 
     private func apply(report: DiagnosticReport) {
@@ -665,6 +679,7 @@ final class DiagnosticViewModel: ObservableObject {
             guard !Task.isCancelled else { return }
             verification = result
             verificationRunTask = nil
+            refreshDecisionQueue()
         }
     }
 
@@ -690,6 +705,7 @@ final class DiagnosticViewModel: ObservableObject {
             guard !Task.isCancelled else { return }
             verification = result
             verificationRunTask = nil
+            refreshDecisionQueue()
         }
     }
 
@@ -827,6 +843,42 @@ final class DiagnosticViewModel: ObservableObject {
                 }
             }
         }
+    }
+
+    func performDecisionAction(_ action: DecisionAction, for item: DecisionQueueItem) {
+        switch action.kind {
+        case .reviewChange:
+            reviewChange(at: item.worktreePath)
+        case .runChecks:
+            runVerification()
+        case .trustProfile:
+            runVerification(trustingProfile: true)
+        case .openAgent:
+            if let terminalID = item.agentTerminalIDs.first,
+               let agent = agentAttention.agents.first(where: { $0.terminalID == terminalID }) {
+                focusAgent(agent)
+            } else if let agent = agentAttention.agents.first(where: {
+                canonicalizePath($0.projectRoot ?? $0.cwd) == canonicalizePath(item.worktreePath)
+            }) {
+                focusAgent(agent)
+            }
+        }
+    }
+
+    func reviewChange(at path: String) {
+        let url = URL(fileURLWithPath: path)
+        // Prefer Cursor when available; otherwise reveal in Finder.
+        let cursor = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.todesktop.230313mzl4w4u92")
+        if let cursor {
+            let config = NSWorkspace.OpenConfiguration()
+            NSWorkspace.shared.open([url], withApplicationAt: cursor, configuration: config)
+        } else {
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        }
+    }
+
+    private func canonicalizePath(_ path: String) -> String {
+        URL(fileURLWithPath: path).standardizedFileURL.path
     }
 
     func setPresentation(_ id: UUID, isActive: Bool) {
@@ -1291,6 +1343,9 @@ struct MenuBarPanel: View {
     @ViewBuilder
     private func metricGrid(_ report: DiagnosticReport) -> some View {
         VStack(spacing: 8) {
+            if let decision = model.decisionQueue.topItem {
+                decisionCard(decision)
+            }
             if model.agentAttention.providerAvailable, !model.agentAttention.agents.isEmpty {
                 attentionCard
             }
@@ -1311,6 +1366,83 @@ struct MenuBarPanel: View {
             agentCard(report)
             contextStrip
             focusStrip
+        }
+    }
+
+    private func decisionCard(_ item: DecisionQueueItem) -> some View {
+        ControlCenterCard {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: item.needsYou ? "exclamationmark.circle.fill" : "checkmark.circle")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(item.needsYou ? Color.orange : Color.green)
+                    Text("NEXT")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(item.subtitle)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(item.needsYou ? Color.orange : Color.secondary)
+                        .lineLimit(1)
+                }
+
+                Text(item.title)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(item.reasons.prefix(4)) { reason in
+                        HStack(alignment: .top, spacing: 6) {
+                            Text(reasonGlyph(reason.severity))
+                                .font(.caption.weight(.bold).monospacedDigit())
+                                .foregroundStyle(reasonColor(reason.severity))
+                                .frame(width: 12, alignment: .leading)
+                            Text(reason.message)
+                                .font(.caption2)
+                                .foregroundStyle(.primary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+
+                HStack(spacing: 6) {
+                    ForEach(item.actions) { action in
+                        Button {
+                            model.performDecisionAction(action, for: item)
+                        } label: {
+                            Text(action.title)
+                                .font(.caption2.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 6)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                        .fill(action.isEnabled
+                                              ? Color.accentColor.opacity(0.18)
+                                              : Color.primary.opacity(0.06))
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!action.isEnabled)
+                    }
+                }
+            }
+        }
+    }
+
+    private func reasonGlyph(_ severity: DecisionSeverity) -> String {
+        switch severity {
+        case .pass: return "✓"
+        case .warn, .fail: return "!"
+        case .info: return "·"
+        }
+    }
+
+    private func reasonColor(_ severity: DecisionSeverity) -> Color {
+        switch severity {
+        case .pass: return .green
+        case .warn: return .orange
+        case .fail: return .red
+        case .info: return .secondary
         }
     }
 
@@ -2011,6 +2143,9 @@ struct MenuBarPanel: View {
 
     private var statusText: String {
         if model.runState == .running { return "Monitoring" }
+        if let decision = model.decisionQueue.topItem, decision.needsYou {
+            return decision.subtitle
+        }
         switch model.verification.state {
         case .failed: return "Exact verification failed"
         case .stale: return "Verification evidence is stale"
