@@ -30,7 +30,13 @@ final class AttentionBannerCenter: NSObject, UNUserNotificationCenterDelegate {
             options: []
         )
         center.setNotificationCategories([category])
-        center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        center.requestAuthorization(options: [.alert, .sound]) { granted, error in
+            if let error {
+                NSLog("Tilde notification authorization error: \(error.localizedDescription)")
+            } else if !granted {
+                NSLog("Tilde notification authorization denied — side banners will not appear")
+            }
+        }
     }
 
     nonisolated func userNotificationCenter(
