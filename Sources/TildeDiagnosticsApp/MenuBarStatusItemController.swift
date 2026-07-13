@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// AppKit status item so the AI remaining % is always visible as text
+/// AppKit status item so today's AI spend is always visible as text
 /// in the macOS menu bar (SwiftUI MenuBarExtra often hides titles).
 @MainActor
 final class MenuBarStatusItemController: NSObject {

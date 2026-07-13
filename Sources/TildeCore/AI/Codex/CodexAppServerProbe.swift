@@ -164,7 +164,16 @@ public actor CodexAppServerProbe: MetricProvider {
         let summary = usageResult?["summary"] as? [String: Any]
         let dailyBuckets = usageResult?["dailyUsageBuckets"] as? [[String: Any]]
         let today = localDateString()
-        let tokensToday = dailyBuckets?.first(where: { ($0["startDate"] as? String)?.prefix(10) == today })?["tokens"] as? Int
+        let todayBucket = dailyBuckets?.first(where: { ($0["startDate"] as? String)?.prefix(10) == today })
+        let tokensToday = todayBucket?["tokens"] as? Int
+        let dailySpend = ExplicitMonetaryValueParser.cents(in: todayBucket).map {
+            DailySpendReading(
+                provider: .codex,
+                cents: $0,
+                basis: .providerReported,
+                observedFrom: Date()
+            )
+        }
 
         let threadResult = resultDictionary(responses[5])
         let threads = threadResult?["data"] as? [[String: Any]]
@@ -185,6 +194,7 @@ public actor CodexAppServerProbe: MetricProvider {
             primaryLimit: primary,
             secondaryLimit: secondary,
             tokensToday: tokensToday,
+            dailySpend: dailySpend,
             lifetimeTokens: summary?["lifetimeTokens"] as? Int,
             threadCount: threads?.count,
             notes: notes

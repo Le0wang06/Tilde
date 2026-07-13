@@ -45,13 +45,13 @@ Live captures from the running app, with project/agent identity and account-usag
   <img src="Docs/assets/tilde-menubar.png" alt="Tilde status item in the macOS menu bar" width="920" />
 </p>
 
-<p align="center"><sub>Real menu-bar title — attention, Codex budget, and live signals</sub></p>
+<p align="center"><sub>Real menu-bar title — daily AI spend, attention, and live signals</sub></p>
 
 <p align="center">
   <img src="Docs/assets/tilde-panel-dark.png" alt="Tilde control panel from the running app" width="360" />
 </p>
 
-<p align="center"><sub>Actual menu-bar panel — agents, CPU/RAM/Fan, AI budget, trust, focus</sub></p>
+<p align="center"><sub>Actual menu-bar panel — agents, CPU/RAM/Fan, AI spend, trust, focus</sub></p>
 
 <p align="center">
   <img src="Docs/assets/tilde-hero.png" alt="Tilde README hero with live panel" width="920" />
@@ -69,7 +69,7 @@ Re-capture anytime with:
 | --- | --- |
 | **System HUD** | CPU sparkline, RAM pressure, disk, network, thermal slowdown alerts |
 | **Fan Boost** | Real SMC fan control via `tilde-fan` (admin password once per login) |
-| **AI budget** | Codex ⇄ Cursor remaining % in one tap-to-cycle card |
+| **AI spend** | Daily Cursor + Codex monetary total in the menu bar; provider limits remain one tap away |
 | **Agent attention** | Herdr inventory, blockers first, one-click focus back to the terminal |
 | **Exact verification** | Explicit repository checks bound to the full Git fingerprint; stale immediately after a change |
 | **Trust packet** | Deterministic Git / exact receipts / CI evidence — no opaque “AI confidence” |
@@ -135,7 +135,9 @@ flowchart TB
   FAN --> SMC["SMC"]
 ```
 
-Sampling slows when the panel is closed. Manual refresh forces everything. Live samples stay **in memory** — not on disk.
+Sampling slows when the panel is closed. Manual refresh forces everything. Live system samples stay
+**in memory**. To derive a daily value from Cursor's cumulative monetary meter, Tilde stores only
+provider, local date, billing-period ID, and cent totals under Application Support.
 
 <details>
 <summary>Sampling intervals</summary>
@@ -160,6 +162,10 @@ Tilde is **local-first**. It does **not** store:
 - source code or diffs  
 - terminal output  
 - auth tokens or account email  
+
+The daily-spend ledger stores monetary counters and observation timestamps only. A trailing `+` in the
+menu bar means the value is a truthful lower bound because a provider or earlier part of the day was not
+reported; Tilde never estimates dollars from token counts or percentages.
 
 Recovery capsules keep only path, branch, attention counts, verification state, and a next-action hint under Application Support.
 Verification receipts keep only repository/worktree/profile/fingerprint hashes, Git object IDs, check

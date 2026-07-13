@@ -6,6 +6,13 @@ public enum Availability<Value: Sendable>: Sendable {
     case failed(message: String)
 }
 
+public extension Availability {
+    var availableValue: Value? {
+        guard case .available(let value) = self else { return nil }
+        return value
+    }
+}
+
 public enum MemoryPressure: String, Codable, Sendable {
     case normal
     case warning

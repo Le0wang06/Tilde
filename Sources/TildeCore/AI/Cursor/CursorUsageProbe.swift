@@ -6,7 +6,11 @@ import Foundation
 /// then calls `GetCurrentPeriodUsage` on `api2.cursor.sh`. Unofficial — may break if
 /// Cursor changes storage or endpoints. Token is never logged.
 public struct CursorUsageProbe: Sendable {
-    public init() {}
+    private let spendLedger: DailySpendLedger
+
+    public init(spendLedger: DailySpendLedger = .shared) {
+        self.spendLedger = spendLedger
+    }
 
     public func fetchSnapshot() async throws -> CursorUsageSnapshot {
         let token = try Self.readAccessToken()
@@ -29,12 +33,30 @@ public struct CursorUsageProbe: Sendable {
             notes.append("Included plan usage limit reached (bonus may still apply).")
         }
 
+        var dailySpend: DailySpendReading?
+        if let cumulativeCents = period.totalSpendCents,
+           let periodID = period.billingCycleID {
+            do {
+                dailySpend = try await spendLedger.record(
+                    provider: .cursor,
+                    cumulativeCents: cumulativeCents,
+                    periodID: periodID
+                )
+                notes.append("Today's Cursor spend is the locally observed delta of its monetary billing meter.")
+            } catch {
+                notes.append("Cursor spend tracking unavailable: \(error.localizedDescription)")
+            }
+        } else {
+            notes.append("Cursor did not return a monetary billing meter for daily tracking.")
+        }
+
         return CursorUsageSnapshot(
             remainingPercent: remaining,
             usedPercent: used,
             planName: membership ?? period.planHint,
             billingCycleEnd: period.billingCycleEnd,
             displayMessage: period.displayMessage,
+            dailySpend: dailySpend,
             notes: notes
         )
     }
@@ -95,6 +117,7 @@ public struct CursorUsageProbe: Sendable {
         let displayMessage = (json["autoModelSelectedDisplayMessage"] as? String)
             ?? (json["displayMessage"] as? String)
         let hitLimit = (json["displayMessage"] as? String)?.localizedCaseInsensitiveContains("limit") == true
+        let totalSpendCents = integerValue(planUsage?["totalSpend"])
 
         let endMillis: Double?
         if let value = json["billingCycleEnd"] as? String {
@@ -111,10 +134,25 @@ public struct CursorUsageProbe: Sendable {
         return PeriodUsage(
             totalPercentUsed: totalPercent,
             billingCycleEnd: endDate,
+            billingCycleID: stringValue(json["billingCycleStart"]),
+            totalSpendCents: totalSpendCents,
             displayMessage: displayMessage,
             hitLimit: hitLimit,
             planHint: nil
         )
+    }
+
+    private static func integerValue(_ value: Any?) -> Int? {
+        if let value = value as? Int { return value }
+        if let value = value as? NSNumber { return Int(value.doubleValue.rounded()) }
+        if let value = value as? String, let number = Double(value) { return Int(number.rounded()) }
+        return nil
+    }
+
+    private static func stringValue(_ value: Any?) -> String? {
+        if let value = value as? String { return value }
+        if let value = value as? NSNumber { return value.stringValue }
+        return nil
     }
 
     private static func fetchMembershipType(token: String) async throws -> String? {
@@ -133,6 +171,8 @@ public struct CursorUsageProbe: Sendable {
     private struct PeriodUsage {
         var totalPercentUsed: Double?
         var billingCycleEnd: Date?
+        var billingCycleID: String?
+        var totalSpendCents: Int?
         var displayMessage: String?
         var hitLimit: Bool
         var planHint: String?

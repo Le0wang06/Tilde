@@ -25,7 +25,7 @@ struct TildeDiagnosticsApp: App {
                 .frame(minWidth: 760, minHeight: 560)
         }
         .defaultSize(width: 920, height: 780)
-        // Menu bar item is an AppKit NSStatusItem so the AI % text is always visible.
+        // Menu bar item is an AppKit NSStatusItem so today's AI spend is always visible.
         // Main window stays closed until Open is pressed in the status-item panel.
     }
 }
@@ -181,7 +181,7 @@ final class DiagnosticViewModel: ObservableObject {
     @Published var report: DiagnosticReport?
     @Published var runState = DiagnosticRunState.idle
     @Published private(set) var history: [LiveMetricSample] = []
-    /// Compact Codex remaining % shown in the macOS menu bar title.
+    /// Compact daily AI spend shown in the macOS menu bar title.
     @Published private(set) var menuBarTitle: String = "~ …"
     @Published private(set) var fanBoost: FanBoostController.Snapshot = .idle
     @Published private(set) var buildPulse = BuildPulseSnapshot()
@@ -381,14 +381,33 @@ final class DiagnosticViewModel: ObservableObject {
                     durationMinutes: 10_080
                 ),
                 tokensToday: 128_000,
+                dailySpend: DailySpendReading(
+                    provider: .codex,
+                    cents: 126,
+                    basis: .providerReported,
+                    observedFrom: Calendar.current.startOfDay(for: Date())
+                ),
                 lifetimeTokens: nil,
                 threadCount: 3,
                 notes: []
             )
+            let demoCursor = CursorUsageSnapshot(
+                remainingPercent: 45,
+                usedPercent: 55,
+                planName: "pro",
+                billingCycleEnd: Date().addingTimeInterval(12 * 24 * 60 * 60),
+                displayMessage: "55% of included usage used",
+                dailySpend: DailySpendReading(
+                    provider: .cursor,
+                    cents: 312,
+                    basis: .providerReported,
+                    observedFrom: Calendar.current.startOfDay(for: Date())
+                )
+            )
             self.report = DiagnosticReport(
                 system: report.system,
                 codex: .available(demoCodex),
-                cursor: report.cursor
+                cursor: .available(demoCursor)
             )
         }
 
@@ -518,7 +537,7 @@ final class DiagnosticViewModel: ObservableObject {
             lastEventSummary: "Focus · Ship"
         )
 
-        menuBarTitle = "~ Cx5h 67% · Cr 45%"
+        menuBarTitle = "~ $4.38 today"
         MenuBarStatusItemController.shared.updateTitle(menuBarTitle)
     }
 
@@ -595,27 +614,17 @@ final class DiagnosticViewModel: ObservableObject {
         attention: AgentAttentionSnapshot,
         verification: VerificationSnapshot
     ) -> String {
-        let cx: String
-        if case .available(let snapshot) = codex, let window = snapshot.menuBarLimit {
-            cx = "\(window.kind.compactLabel) \(window.remainingPercent)%"
-        } else {
-            cx = "—"
-        }
-
-        let cr: String
-        if case .available(let snapshot) = cursor, let remaining = snapshot.remainingPercent {
-            cr = "\(remaining)%"
-        } else {
-            cr = "—"
-        }
-
-        var title = "~ Cx\(cx) · Cr \(cr)"
+        let spend = DailyAISpendSummary(
+            codex: codex.availableValue?.dailySpend,
+            cursor: cursor.availableValue?.dailySpend
+        )
+        var title = "~ \(spend.menuBarText)"
         let attentionCount = attention.attentionCount
         if attentionCount > 0 {
-            title = "~ !\(attentionCount) · Cx\(cx)"
+            title = "~ !\(attentionCount) · \(spend.menuBarText)"
         }
         if verification.state == .failed || verification.state == .stale {
-            title = "~ ! · Cx\(cx)"
+            title = "~ ! · \(spend.menuBarText)"
         } else if verification.state == .running {
             title += " · V…"
         }
@@ -1670,8 +1679,32 @@ struct MenuBarPanel: View {
     }
 
     private func agentCard(_ report: DiagnosticReport) -> some View {
-        ControlCenterCard {
-            VStack(alignment: .leading, spacing: 6) {
+        let spend = DailyAISpendSummary(
+            codex: report.codex.availableValue?.dailySpend,
+            cursor: report.cursor.availableValue?.dailySpend
+        )
+        return ControlCenterCard {
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text("AI SPEND · TODAY")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 4)
+                    Text(spend.knownTotalCents.map(DailyAISpendSummary.usd) ?? "$—")
+                        .font(.title3.weight(.semibold).monospacedDigit())
+                }
+                Text(spend.detailText)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                if !spend.hasCompleteProviderCoverage, spend.knownTotalCents != nil {
+                    Text("Lower bound · missing provider or pre-tracking spend")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+
+                Divider()
+
                 Button {
                     withAnimation(.easeInOut(duration: 0.15)) {
                         agentPane = agentPane == .codex ? .cursor : .codex
@@ -1681,7 +1714,7 @@ struct MenuBarPanel: View {
                         Image(systemName: agentPane.symbol)
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(.secondary)
-                        Text("AI · \(agentPane.title)")
+                        Text("LIMITS · \(agentPane.title)")
                             .font(.caption2.weight(.bold))
                             .foregroundStyle(.secondary)
                         Spacer(minLength: 4)

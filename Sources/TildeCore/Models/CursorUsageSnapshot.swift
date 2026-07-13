@@ -6,6 +6,7 @@ public struct CursorUsageSnapshot: Sendable, Equatable {
     public let planName: String?
     public let billingCycleEnd: Date?
     public let displayMessage: String?
+    public let dailySpend: DailySpendReading?
     public let notes: [String]
 
     public init(
@@ -14,6 +15,7 @@ public struct CursorUsageSnapshot: Sendable, Equatable {
         planName: String?,
         billingCycleEnd: Date?,
         displayMessage: String?,
+        dailySpend: DailySpendReading? = nil,
         notes: [String] = []
     ) {
         self.remainingPercent = remainingPercent
@@ -21,6 +23,7 @@ public struct CursorUsageSnapshot: Sendable, Equatable {
         self.planName = planName
         self.billingCycleEnd = billingCycleEnd
         self.displayMessage = displayMessage
+        self.dailySpend = dailySpend
         self.notes = notes
     }
 }
