@@ -702,6 +702,25 @@ final class DiagnosticViewModel: ObservableObject {
         }
     }
 
+    func clearVerificationResult() {
+        guard verificationRunTask == nil,
+              let root = projectContext.rootPath else { return }
+        verificationRunTask = Task { [weak self] in
+            guard let self else { return }
+            let result: VerificationSnapshot
+            do {
+                result = try await verificationService.clearReceipt(rootPath: root)
+            } catch {
+                var retryable = await verificationService.snapshot(rootPath: root)
+                retryable.message = error.localizedDescription
+                result = retryable
+            }
+            guard !Task.isCancelled else { return }
+            verification = result
+            verificationRunTask = nil
+        }
+    }
+
     private func noteBuildPulseTransition(_ snapshot: BuildPulseSnapshot) {
         guard snapshot.phase != lastLoggedBuildPhase else { return }
         defer { lastLoggedBuildPhase = snapshot.phase }
@@ -1484,17 +1503,37 @@ struct MenuBarPanel: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
             .help("Trust this exact repository and profile hash, then run the commands shown above")
-        case .missing, .failed, .partial, .stale:
-            Button(snapshot.state == .stale ? "Run for Current Change" : "Run Required Checks") {
+        case .missing:
+            Button("Run Required Checks") {
                 model.runVerification()
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
-        case .verified:
-            Button("Run Again") {
-                model.runVerification()
+        case .failed, .partial, .stale:
+            HStack(spacing: 6) {
+                Button(snapshot.state == .stale ? "Run for Current Change" : "Run Required Checks") {
+                    model.runVerification()
+                }
+                .buttonStyle(.borderedProminent)
+                Button("Clear Result") {
+                    model.clearVerificationResult()
+                }
+                .buttonStyle(.bordered)
+                .help("Delete the stored verification receipt for this worktree")
             }
-            .buttonStyle(.bordered)
+            .controlSize(.small)
+        case .verified:
+            HStack(spacing: 6) {
+                Button("Run Again") {
+                    model.runVerification()
+                }
+                .buttonStyle(.bordered)
+                Button("Clear Result") {
+                    model.clearVerificationResult()
+                }
+                .buttonStyle(.bordered)
+                .help("Delete the stored verification receipt for this worktree")
+            }
             .controlSize(.small)
         case .running:
             Button("Cancel Checks", role: .cancel) {

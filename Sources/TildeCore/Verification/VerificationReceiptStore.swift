@@ -19,6 +19,12 @@ public actor VerificationReceiptStore {
         try persist()
     }
 
+    public func clear(worktreeID: String) throws {
+        loadIfNeeded()
+        records?.removeValue(forKey: worktreeID)
+        try persist()
+    }
+
     private func loadIfNeeded() {
         guard records == nil else { return }
         guard let data = try? Data(contentsOf: fileURL),

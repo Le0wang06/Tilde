@@ -150,6 +150,32 @@ public actor VerificationService {
         await runner.cancel()
     }
 
+    public func clearReceipt(rootPath: String) async throws -> VerificationSnapshot {
+        guard let loadedProfile = try profileLoader.load(from: rootPath) else {
+            return VerificationSnapshot(state: .unconfigured, projectRoot: rootPath)
+        }
+        let changeSet = try fingerprintProvider.snapshot(
+            rootPath: rootPath,
+            profileHash: loadedProfile.profileHash,
+            configuredBase: loadedProfile.profile.base
+        )
+        guard runningWorktreeID != changeSet.worktreeID else {
+            throw VerificationError.runInProgress
+        }
+        try await receiptStore.clear(worktreeID: changeSet.worktreeID)
+        let trusted = await trustStore.isTrusted(
+            repositoryID: changeSet.repositoryID,
+            profileHash: loadedProfile.profileHash
+        )
+        return snapshot(
+            rootPath: rootPath,
+            changeSet: changeSet,
+            loadedProfile: loadedProfile,
+            record: nil,
+            trusted: trusted
+        )
+    }
+
     private func setActiveCheckName(_ name: String) {
         activeCheckName = name
     }

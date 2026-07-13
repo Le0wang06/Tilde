@@ -148,6 +148,11 @@ import Testing
     )
     let stale = await service.snapshot(rootPath: root.path)
     #expect(stale.state == .stale)
+
+    let cleared = try await service.clearReceipt(rootPath: root.path)
+    #expect(cleared.state == .missing)
+    let clearedStore = try String(contentsOf: receiptURL, encoding: .utf8)
+    #expect(!clearedStore.contains(verified.changeSet?.worktreeID ?? "missing-worktree"))
 }
 
 @Test func trustAndRunRejectsAProfileChangedAfterReview() async throws {
