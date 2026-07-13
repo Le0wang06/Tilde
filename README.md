@@ -1,56 +1,55 @@
-# ~
-
 # Tilde
 
 <p align="center">
-  <img alt="macOS 14+" src="https://img.shields.io/badge/platform-macOS%2014%2B-111111?style=for-the-badge" />
-  <img alt="Swift 6.1" src="https://img.shields.io/badge/Swift-6.1-F05138?style=for-the-badge&logo=swift&logoColor=white" />
-  <img alt="Local-first" src="https://img.shields.io/badge/privacy-local--first-2ea44f?style=for-the-badge" />
+  <img src="Docs/assets/tilde-hero.png" alt="Tilde — menu-bar command center" width="920" />
 </p>
 
 <p align="center">
-  <strong>A native macOS menu-bar command center</strong><br/>
-  for machine health, AI agent attention, and change verification.
+  <strong>Native macOS menu-bar command center</strong><br/>
+  Machine health · AI agent attention · Change verification · Local recovery
 </p>
 
 <p align="center">
-  <a href="#quick-start"><strong>Quick start</strong></a> ·
-  <a href="#what-you-get"><strong>What you get</strong></a> ·
-  <a href="#deep-links"><strong>Deep links</strong></a> ·
-  <a href="#privacy"><strong>Privacy</strong></a> ·
-  <a href="#docs"><strong>Docs</strong></a>
+  <img alt="macOS 14+" src="https://img.shields.io/badge/macOS-14%2B-black?style=flat-square" />
+  <img alt="Swift 6.1" src="https://img.shields.io/badge/Swift-6.1-F05138?style=flat-square&logo=swift&logoColor=white" />
+  <img alt="Local-first" src="https://img.shields.io/badge/privacy-local--first-2ea44f?style=flat-square" />
+  <img alt="SwiftPM" src="https://img.shields.io/badge/build-SwiftPM-555?style=flat-square" />
+</p>
+
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#gallery">Gallery</a> ·
+  <a href="#what-you-get">Features</a> ·
+  <a href="#privacy">Privacy</a> ·
+  <a href="#docs">Docs</a>
 </p>
 
 ---
 
-## Why Tilde
+Tilde lives in your menu bar and answers four questions without stealing focus:
 
-Most tools either edit code or run agents. Tilde sits in between — always visible, never noisy — and answers four questions:
+| | Question | What Tilde shows |
+| ---: | --- | --- |
+| **1** | What needs me? | Blocked / ready Herdr agents, ordered by attention |
+| **2** | What changed? | Branch, dirty state, ahead/behind, project context |
+| **3** | Is it safe? | Deterministic Git · build · CI trust evidence |
+| **4** | Where do I resume? | Private recovery capsule per project |
 
-```text
-  1  What needs me?     →  blocked / ready agents
-  2  What changed?      →  project context + dirty state
-  3  Is it safe?        →  Git · build · CI evidence
-  4  Where do I resume? →  local recovery capsule
-```
+Editors edit. Herdr runs agents. **Tilde is the ambient layer between them.**
 
-```text
-┌─────────────────────────────────────────────────────────┐
-│  ~  2 need you · Cx 67% · ⚒ · !                         │
-└─────────────────────────────────────────────────────────┘
-                          │ click
-                          ▼
-┌──────────────────────────────┐
-│  CPU ████▁▂▃   RAM  41%      │
-│  FAN  [boost]  DISK · NET    │
-│  AI · CODEX ⇄ CURSOR         │
-│  AGENTS · need you           │
-│  Trust · Build · Project     │
-│  FOCUS  Ship  Meet  Battery  │
-└──────────────────────────────┘
-```
+## Gallery
 
-Editors edit. Herdr runs agents. **Tilde is the ambient attention layer.**
+<p align="center">
+  <img src="Docs/assets/tilde-menubar.png" alt="Tilde in the macOS menu bar" width="920" />
+</p>
+
+<p align="center"><sub>Always-on menu title — attention, Codex budget, build and thermal signals</sub></p>
+
+<p align="center">
+  <img src="Docs/assets/tilde-panel-dark.png" alt="Tilde control panel" width="420" />
+</p>
+
+<p align="center"><sub>Compact Control Center–style panel — CPU sparkline, Fan Boost, AI budget, agents, focus</sub></p>
 
 ## What you get
 
