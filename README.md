@@ -1,7 +1,7 @@
 # Tilde
 
 <p align="center">
-  <img src="Docs/assets/tilde-hero.png" alt="Tilde — menu-bar command center" width="920" />
+  <img src="Docs/assets/tilde-logo.png" alt="Tilde" width="120" />
 </p>
 
 <p align="center">
@@ -30,10 +30,12 @@ Tilde lives in your menu bar and answers four questions without stealing focus:
 
 | | Question | What Tilde shows |
 | ---: | --- | --- |
-| **1** | What needs me? | Blocked / ready Herdr agents, ordered by attention |
+| **1** | What needs me? | **Needs you** decision card — one change, why it matters, one primary action |
 | **2** | What changed? | Branch, dirty state, ahead/behind, project context |
-| **3** | Is it safe? | Deterministic Git · build · CI trust evidence |
+| **3** | Is it safe? | Deterministic Git · exact verification · CI trust evidence |
 | **4** | Where do I resume? | Private recovery capsule per project |
+
+When an agent blocks or finishes a turn, Tilde also pings you: a `!` on the spend title, a short sound, and a native macOS side banner (when notifications are allowed).
 
 Editors edit. Herdr runs agents. **Tilde is the ambient layer between them.**
 
@@ -45,13 +47,13 @@ Live captures from the running app, with project/agent identity and account-usag
   <img src="Docs/assets/tilde-menubar.png" alt="Tilde status item in the macOS menu bar" width="920" />
 </p>
 
-<p align="center"><sub>Real menu-bar title — daily AI spend, attention, and live signals</sub></p>
+<p align="center"><sub>Menu bar stays price-first — <code>!</code> appears when an agent needs attention</sub></p>
 
 <p align="center">
   <img src="Docs/assets/tilde-panel-dark.png" alt="Tilde control panel from the running app" width="360" />
 </p>
 
-<p align="center"><sub>Actual menu-bar panel — agents, CPU/RAM/Fan, AI spend, trust, focus</sub></p>
+<p align="center"><sub>Panel leads with Needs you, then agents, verification, and live machine health</sub></p>
 
 <p align="center">
   <img src="Docs/assets/tilde-hero.png" alt="Tilde README hero with live panel" width="920" />
@@ -63,13 +65,21 @@ Re-capture anytime with:
 ./Scripts/capture-readme-assets.sh
 ```
 
+Install / relaunch the menu-bar app with:
+
+```sh
+./Scripts/install-and-start.sh
+```
+
 ## What you get
 
 | Area | In the menu bar / panel |
 | --- | --- |
+| **Needs you** | Change-centered queue: one card per worktree, ranked reasons, Review / Run Checks / Open Agent |
+| **Attention alerts** | Menu-bar `!`, local sound, and Notification Center banners when agents block or finish |
 | **System HUD** | CPU sparkline, RAM pressure, disk, network, thermal slowdown alerts |
 | **Fan Boost** | Real SMC fan control via `tilde-fan` (admin password once per login) |
-| **AI spend** | Daily Cursor usage + Codex credit-equivalent estimate in the menu bar; limits remain one tap away |
+| **AI spend** | Daily Cursor usage + Codex credit-equivalent estimate as the always-on menu title |
 | **Agent attention** | Herdr inventory, blockers first, one-click focus back to the terminal |
 | **Exact verification** | Explicit repository checks bound to the full Git fingerprint; stale immediately after a change |
 | **Trust packet** | Deterministic Git / exact receipts / CI evidence — no opaque “AI confidence” |
@@ -86,19 +96,22 @@ Xcode is optional for SwiftPM runs; required for XCTest, signing, and distributi
 git clone https://github.com/Le0wang06/Tilde.git
 cd Tilde
 swift build
-./Scripts/run-app.sh     # wraps .app + registers tilde://
+./Scripts/install-and-start.sh   # packages ~/Applications/Tilde.app + login item
 ```
 
 | Command | What it does |
 | --- | --- |
+| `./Scripts/install-and-start.sh` | Build, install to `~/Applications/Tilde.app`, launch at login |
 | `./Scripts/run-app.sh` | Build, package as `.app`, launch, register URL scheme |
 | `swift run TildeDiagnostics` | Run without packaging |
 | `swift run tilde-probe` | Non-GUI probe / feasibility report |
 | `./Scripts/test.sh` | Calculation + state tests |
 
+Allow **notifications** for Tilde in System Settings if you want side banners when agents finish or need input.
+
 ## Deep links
 
-After `./Scripts/run-app.sh`:
+After `./Scripts/run-app.sh` or `./Scripts/install-and-start.sh`:
 
 | URL | Action |
 | --- | --- |
@@ -118,19 +131,23 @@ open 'tilde://refresh'
 
 ```mermaid
 flowchart TB
-  MB["Menu bar · ~ title"]
+  MB["Menu bar · spend · !"]
   PN["Compact panel"]
   MB --> PN
 
+  PN --> NQ["Needs you · DecisionQueue"]
   PN --> LIVE["LiveMonitoringService"]
   PN --> AG["HerdrAgentProvider"]
   PN --> TR["Trust / verification"]
   PN --> FAN["FanBoost + tilde-fan"]
   PN --> DY["Session diary"]
 
+  NQ --> AG
+  NQ --> TR
+  AG --> HR["Herdr"]
+  AG --> AL["Banners · sound · !"]
   LIVE --> CX["Codex"]
   LIVE --> CR["Cursor"]
-  AG --> HR["Herdr"]
   TR --> GT["Git / gh"]
   FAN --> SMC["SMC"]
 ```
@@ -150,7 +167,7 @@ provider, local date, billing-period ID, and cent totals under Application Suppo
 | Storage | 60s | 5m |
 | Codex | 60s | 2m |
 | Cursor | 2m | 5m |
-| Herdr agents | 2s | 2s |
+| Herdr agents | 2s (0.5s while working) | same |
 
 </details>
 
@@ -172,6 +189,8 @@ Recovery capsules keep only path, branch, attention counts, verification state, 
 Verification receipts keep only repository/worktree/profile/fingerprint hashes, Git object IDs, check
 IDs and names, timestamps, durations, outcomes, and exit statuses. Command output remains ephemeral
 and is never written to the receipt store.
+
+The decision queue stores paths, branch names, reason text, and action metadata only.
 
 ## Exact verification profiles
 
@@ -208,7 +227,7 @@ verification process group on cancellation or timeout.
 | `TildeDiagnostics` | Menu-bar app + diagnostics window |
 | `tilde-probe` | CLI feasibility report |
 | `tilde-fan` | Privileged fan daemon / CLI |
-| `TildeCore` | Shared monitoring, agents, trust, diary |
+| `TildeCore` | Shared monitoring, agents, trust, decision queue, diary |
 
 ## Docs
 
@@ -218,7 +237,7 @@ verification process group on cancellation or timeout.
 
 ## Status
 
-Phase 0 diagnostics are solid. The AI attention / verification slice is in active dogfooding. Release gates: idle CPU, no notification spam on launch, low false blocked/done rates — details in the control-plane doc.
+Phase 0 diagnostics are solid. Needs you, attention banners, and exact verification are in active dogfooding. Release gates: idle CPU, no notification spam on launch, low false blocked/done rates — details in the control-plane doc.
 
 ---
 
