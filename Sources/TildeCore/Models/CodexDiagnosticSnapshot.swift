@@ -57,6 +57,8 @@ public struct CodexDiagnosticSnapshot: Sendable {
     public let primaryLimit: CodexRateLimitWindow?
     public let secondaryLimit: CodexRateLimitWindow?
     public let tokensToday: Int?
+    public let dailySpend: DailySpendReading?
+    public let estimatedCreditsToday: Double?
     public let lifetimeTokens: Int?
     public let threadCount: Int?
     public let notes: [String]
@@ -70,6 +72,8 @@ public struct CodexDiagnosticSnapshot: Sendable {
         primaryLimit: CodexRateLimitWindow?,
         secondaryLimit: CodexRateLimitWindow?,
         tokensToday: Int?,
+        dailySpend: DailySpendReading? = nil,
+        estimatedCreditsToday: Double? = nil,
         lifetimeTokens: Int?,
         threadCount: Int?,
         notes: [String]
@@ -82,6 +86,8 @@ public struct CodexDiagnosticSnapshot: Sendable {
         self.primaryLimit = primaryLimit
         self.secondaryLimit = secondaryLimit
         self.tokensToday = tokensToday
+        self.dailySpend = dailySpend
+        self.estimatedCreditsToday = estimatedCreditsToday
         self.lifetimeTokens = lifetimeTokens
         self.threadCount = threadCount
         self.notes = notes
