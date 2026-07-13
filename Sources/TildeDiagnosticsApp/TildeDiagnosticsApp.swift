@@ -356,6 +356,35 @@ final class DiagnosticViewModel: ObservableObject {
     func applyReadmeDemoStubs() {
         freezeIdentityForReadmeCapture = true
 
+        if let report {
+            let demoCodex = CodexDiagnosticSnapshot(
+                executablePath: "/usr/local/bin/codex",
+                version: "demo",
+                isAuthenticated: true,
+                accountType: "chatgpt",
+                planType: "demo",
+                primaryLimit: CodexRateLimitWindow(
+                    usedPercent: 33,
+                    resetsAt: Date().addingTimeInterval(2 * 60 * 60),
+                    durationMinutes: 300
+                ),
+                secondaryLimit: CodexRateLimitWindow(
+                    usedPercent: 18,
+                    resetsAt: Date().addingTimeInterval(4 * 24 * 60 * 60),
+                    durationMinutes: 10_080
+                ),
+                tokensToday: 128_000,
+                lifetimeTokens: nil,
+                threadCount: 3,
+                notes: []
+            )
+            self.report = DiagnosticReport(
+                system: report.system,
+                codex: .available(demoCodex),
+                cursor: report.cursor
+            )
+        }
+
         projectContext = ProjectContextSnapshot(
             projectName: "demo-app",
             rootPath: "/Users/you/Projects/demo-app",
@@ -414,21 +443,26 @@ final class DiagnosticViewModel: ObservableObject {
         )
 
         trustPacket = TrustPacketSnapshot(
-            state: .ready,
+            state: .needsVerification,
             projectRoot: "/Users/you/Projects/demo-app",
             changedFiles: 2,
             additions: 48,
-            deletions: 6
+            deletions: 6,
+            comparisonBase: "main",
+            risks: [TrustRisk(
+                kind: .buildUnknown,
+                message: "No build result is bound to this exact change"
+            )]
         )
 
         recoveryCapsule = RecoveryCapsule(
             projectRoot: "/Users/you/Projects/demo-app",
             projectName: "demo-app",
             branch: "main",
-            headline: "2 files · evidence ready",
+            headline: "1 check · 2 files vs main",
             nextAction: "Review and verify",
             attentionCount: 0,
-            verificationState: TrustPacketState.ready.rawValue,
+            verificationState: TrustPacketState.needsVerification.rawValue,
             changedFiles: 2
         )
 
@@ -440,11 +474,12 @@ final class DiagnosticViewModel: ObservableObject {
             lastEventSummary: "Focus · Ship"
         )
 
-        menuBarTitle = "~ Cx 67% · Cr 45%"
+        menuBarTitle = "~ Cx5h 67% · Cr 45%"
         MenuBarStatusItemController.shared.updateTitle(menuBarTitle)
     }
 
     private func apply(report: DiagnosticReport) {
+        guard !freezeIdentityForReadmeCapture else { return }
         self.report = report
         historyBuffer.append(LiveMetricSample(snapshot: report.system))
         history = historyBuffer.samples
@@ -515,8 +550,8 @@ final class DiagnosticViewModel: ObservableObject {
         attention: AgentAttentionSnapshot
     ) -> String {
         let cx: String
-        if case .available(let snapshot) = codex, let remaining = snapshot.primaryLimit?.remainingPercent {
-            cx = "\(remaining)%"
+        if case .available(let snapshot) = codex, let window = snapshot.menuBarLimit {
+            cx = "\(window.kind.compactLabel) \(window.remainingPercent)%"
         } else {
             cx = "—"
         }
@@ -528,10 +563,10 @@ final class DiagnosticViewModel: ObservableObject {
             cr = "—"
         }
 
-        var title = "~ Cx \(cx) · Cr \(cr)"
+        var title = "~ Cx\(cx) · Cr \(cr)"
         let attentionCount = attention.attentionCount
         if attentionCount > 0 {
-            title = "~ \(attentionCount) need\(attentionCount == 1 ? "s" : "") you · Cx \(cx)"
+            title = "~ !\(attentionCount) · Cx\(cx)"
         }
         if build.phase == .running {
             title += " · ⚒"
@@ -811,7 +846,8 @@ private struct DiagnosticContentView: View {
     }
 
     private func overview(_ report: DiagnosticReport) -> some View {
-        HStack(spacing: 10) {
+        let codexWindow = codexDisplayWindow(report.codex)
+        return HStack(spacing: 10) {
             SummaryMetric(
                 title: "CPU",
                 value: cpuPercent(report.system.cpu).map(percent) ?? "--",
@@ -835,10 +871,10 @@ private struct DiagnosticContentView: View {
             )
             SummaryMetric(
                 title: "Codex",
-                value: codexRemaining(report.codex).map { "\($0)%" } ?? "--",
-                detail: "Allowance remaining",
-                color: codexRemaining(report.codex).map(MetricColor.remaining) ?? .secondary,
-                fraction: codexRemaining(report.codex).map { Double($0) / 100 }
+                value: codexWindow.map { "\($0.remainingPercent)%" } ?? "--",
+                detail: codexWindow.map { "\($0.kind.label) remaining" } ?? "Allowance unavailable",
+                color: codexWindow.map { MetricColor.remaining($0.remainingPercent) } ?? .secondary,
+                fraction: codexWindow.map { Double($0.remainingPercent) / 100 }
             )
         }
     }
@@ -934,21 +970,20 @@ private struct DiagnosticContentView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     switch availability {
                     case .available(let codex):
-                        if let primary = codex.primaryLimit {
-                            MetricBar(
-                                label: "Current Window",
-                                value: "\(primary.remainingPercent)% remaining",
-                                fraction: Double(primary.remainingPercent) / 100,
-                                color: MetricColor.remaining(primary.remainingPercent),
-                                detail: primary.resetsAt.map { "Resets \($0.formatted(date: .omitted, time: .shortened))" }
-                            )
+                        let windows = codex.rateLimitWindows.sorted {
+                            codexWindowOrder($0.kind) < codexWindowOrder($1.kind)
                         }
-                        if let secondary = codex.secondaryLimit {
+                        if windows.isEmpty {
+                            MetricRow(label: "Usage windows", value: "Not reported", isUnavailable: true)
+                        }
+                        ForEach(windows.indices, id: \.self) { index in
+                            let window = windows[index]
                             MetricBar(
-                                label: "Secondary Window",
-                                value: "\(secondary.remainingPercent)% remaining",
-                                fraction: Double(secondary.remainingPercent) / 100,
-                                color: MetricColor.remaining(secondary.remainingPercent)
+                                label: codexWindowLabel(window),
+                                value: "\(window.remainingPercent)% remaining",
+                                fraction: Double(window.remainingPercent) / 100,
+                                color: MetricColor.remaining(window.remainingPercent),
+                                detail: window.resetsAt.map { "Resets \($0.formatted(date: .abbreviated, time: .shortened))" }
                             )
                         }
                         MetricRow(label: "Tokens Today", value: codex.tokensToday.map(formatCount) ?? "Unavailable")
@@ -1025,9 +1060,11 @@ private struct DiagnosticContentView: View {
         return "\(value.pressure.rawValue.capitalized) pressure"
     }
 
-    private func codexRemaining(_ availability: Availability<CodexDiagnosticSnapshot>) -> Int? {
+    private func codexDisplayWindow(
+        _ availability: Availability<CodexDiagnosticSnapshot>
+    ) -> CodexRateLimitWindow? {
         guard case .available(let codex) = availability else { return nil }
-        return codex.primaryLimit?.remainingPercent
+        return codex.menuBarLimit
     }
 
     private func availabilityText<Value: Sendable>(
@@ -1388,20 +1425,11 @@ struct MenuBarPanel: View {
 
                 switch agentPane {
                 case .codex:
-                    agentRemaining(
-                        percent: {
-                            if case .available(let codex) = report.codex {
-                                return codex.primaryLimit?.remainingPercent
-                            }
-                            return nil
-                        }(),
-                        detail: {
-                            if case .available(let codex) = report.codex {
-                                return "Today \(codex.tokensToday.map(compactCount) ?? "—") tokens"
-                            }
-                            return "Unavailable"
-                        }()
-                    )
+                    if case .available(let codex) = report.codex {
+                        codexWindowSummary(codex)
+                    } else {
+                        agentRemaining(percent: nil, detail: "Codex unavailable")
+                    }
                 case .cursor:
                     agentRemaining(
                         percent: {
@@ -1441,6 +1469,47 @@ struct MenuBarPanel: View {
         }
     }
 
+    private func codexWindowSummary(_ codex: CodexDiagnosticSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            compactCodexWindow(label: "5h", window: codex.fiveHourLimit)
+            compactCodexWindow(label: "7d", window: codex.weeklyLimit)
+            if codex.fiveHourLimit == nil,
+               codex.weeklyLimit == nil,
+               let other = codex.rateLimitWindows.first {
+                compactCodexWindow(label: codexWindowLabel(other), window: other)
+            }
+            Text("Today \(codex.tokensToday.map(compactCount) ?? "—") tokens")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+    }
+
+    private func compactCodexWindow(label: String, window: CodexRateLimitWindow?) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(label)
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 22, alignment: .leading)
+                Text(window.map { "\($0.remainingPercent)% left" } ?? "Not reported")
+                    .font(.caption.weight(.semibold).monospacedDigit())
+                Spacer(minLength: 4)
+                if let reset = window?.resetsAt {
+                    Text("↻ \(compactCodexReset(reset))")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            if let window {
+                ColorBar(
+                    fraction: Double(window.remainingPercent) / 100,
+                    color: MetricColor.remaining(window.remainingPercent)
+                )
+            }
+        }
+    }
+
     private var contextStrip: some View {
         ControlCenterCard {
             VStack(alignment: .leading, spacing: 4) {
@@ -1464,6 +1533,22 @@ struct MenuBarPanel: View {
                     value: model.trustPacket.summary,
                     tint: trustTint
                 )
+                if let risk = model.trustPacket.risks.first {
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
+                        Text(risk.message)
+                            .lineLimit(2)
+                        if model.trustPacket.risks.count > 1 {
+                            Text("+\(model.trustPacket.risks.count - 1)")
+                                .fontWeight(.bold)
+                                .accessibilityLabel(
+                                    "\(model.trustPacket.risks.count - 1) more checks"
+                                )
+                        }
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(trustTint)
+                    .padding(.leading, 64)
+                }
                 compactRow(
                     symbol: "book.closed",
                     label: "Today",
@@ -1648,7 +1733,8 @@ struct MenuBarPanel: View {
     private var statusText: String {
         if model.runState == .running { return "Monitoring" }
         if model.agentAttention.attentionCount > 0 {
-            return "\(model.agentAttention.attentionCount) agent\(model.agentAttention.attentionCount == 1 ? "" : "s") need you"
+            let count = model.agentAttention.attentionCount
+            return "\(count) agent\(count == 1 ? " needs" : "s need") you"
         }
         guard let report = model.report else { return "Starting" }
         if report.system.thermalState == .critical { return "Thermal Pressure" }
@@ -1684,6 +1770,29 @@ struct MenuBarPanel: View {
     private func compactCount(_ value: Int) -> String {
         value.formatted(.number.notation(.compactName))
     }
+}
+
+private func codexWindowOrder(_ kind: CodexRateLimitKind) -> Int {
+    switch kind {
+    case .fiveHour: return 0
+    case .weekly: return 1
+    case .other: return 2
+    }
+}
+
+private func codexWindowLabel(_ window: CodexRateLimitWindow) -> String {
+    if window.kind != .other { return window.kind.label }
+    guard let minutes = window.durationMinutes else { return window.kind.label }
+    if minutes.isMultiple(of: 1_440) { return "\(minutes / 1_440)-day window" }
+    if minutes.isMultiple(of: 60) { return "\(minutes / 60)-hour window" }
+    return "\(minutes)-minute window"
+}
+
+private func compactCodexReset(_ reset: Date, calendar: Calendar = .current) -> String {
+    if calendar.isDateInToday(reset) {
+        return reset.formatted(date: .omitted, time: .shortened)
+    }
+    return reset.formatted(date: .abbreviated, time: .omitted)
 }
 
 private struct ControlCenterCard<Content: View>: View {
