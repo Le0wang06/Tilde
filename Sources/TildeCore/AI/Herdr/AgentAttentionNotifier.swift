@@ -3,6 +3,8 @@ import UserNotifications
 
 @MainActor
 public final class AgentAttentionNotifier {
+    public static let categoryIdentifier = "tilde.attention"
+
     private var authorizationRequested = false
 
     public init() {}
@@ -13,17 +15,23 @@ public final class AgentAttentionNotifier {
 
         for event in events {
             let content = UNMutableNotificationContent()
-            content.title = event.kind == .needsInput
-                ? "Tilde · Agent needs you"
-                : "Tilde · Ready to review"
-            content.body = "\(event.agent.projectName) · \(event.agent.agent.capitalized)"
-            // Sound on every attention transition — blocked and ready-to-review
-            // both mean the human should notice.
+            content.title = AttentionBannerCopy.title(for: event.kind)
+            content.subtitle = "Tilde"
+            content.body = AttentionBannerCopy.body(for: event.agent)
             content.sound = .default
-            content.userInfo = ["terminalID": event.agent.terminalID]
+            content.categoryIdentifier = Self.categoryIdentifier
+            content.threadIdentifier = "tilde.attention"
+            content.userInfo = [
+                "terminalID": event.agent.terminalID,
+                "kind": event.kind.rawValue,
+                "projectName": event.agent.projectName,
+            ]
+            if #available(macOS 12.0, *) {
+                content.interruptionLevel = event.kind == .needsInput ? .timeSensitive : .active
+            }
 
             let request = UNNotificationRequest(
-                identifier: "tilde-agent-\(event.kind.rawValue)-\(event.agent.terminalID)",
+                identifier: AttentionBannerCopy.requestID(for: event),
                 content: content,
                 trigger: nil
             )

@@ -8,6 +8,18 @@ import Testing
     #expect(MenuBarAttentionTitle.compose(spendText: "$—", needsAttention: true) == "! $—")
 }
 
+@Test func attentionBannerCopyDescribesNeedsInputAndReview() {
+    let blocked = makeAgent(id: "a", state: .blocked, project: "demo-app")
+    #expect(AttentionBannerCopy.title(for: .needsInput) == "Agent needs you")
+    #expect(AttentionBannerCopy.title(for: .completed) == "Ready to review")
+    #expect(AttentionBannerCopy.body(for: blocked) == "demo-app · main · Codex")
+    #expect(
+        AttentionBannerCopy.requestID(
+            for: AgentAttentionEvent(kind: .needsInput, agent: blocked)
+        ) == "tilde-agent-needsInput-a"
+    )
+}
+
 @Test func herdrAgentListParsesAttentionAndProjectIdentity() throws {
     let json = #"""
     {
