@@ -11,7 +11,7 @@ public enum TrustPacketState: String, Sendable, Equatable {
         case .unavailable: return "No project"
         case .verifying: return "Matching checks running"
         case .needsVerification: return "Review needed"
-        case .ready: return "No change detected"
+        case .ready: return "No known warnings"
         }
     }
 }
@@ -21,6 +21,9 @@ public enum TrustRiskKind: String, Codable, Sendable, Equatable {
     case sensitiveFiles
     case buildUnknown
     case buildFailed
+    case verificationMissing
+    case verificationFailed
+    case verificationStale
     case ciUnknown
     case ciPending
     case ciFailed
@@ -94,7 +97,8 @@ public actor TrustPacketProvider {
         rootPath: String?,
         build: BuildPulseSnapshot,
         ciStatus: ProjectCIStatus,
-        behind: Int?
+        behind: Int?,
+        verification: VerificationSnapshot = .unavailable
     ) -> TrustPacketSnapshot {
         guard let rootPath else { return .unavailable }
 
@@ -135,21 +139,38 @@ public actor TrustPacketProvider {
             ))
         }
         if !paths.isEmpty {
-            switch build.phase {
-            case .finished where build.lastSucceeded == false:
-                risks.append(TrustRisk(kind: .buildFailed, message: "The last observed build failed"))
-            case .finished where build.lastSucceeded == true:
-                risks.append(TrustRisk(
-                    kind: .buildUnknown,
-                    message: "A build passed, but it is not bound to this exact change"
-                ))
+            switch verification.state {
+            case .verified:
+                break
             case .running:
+                break
+            case .failed:
                 risks.append(TrustRisk(
-                    kind: .buildUnknown,
-                    message: "A build is running, but it is not bound to this exact change"
+                    kind: .verificationFailed,
+                    message: "Required checks failed for this exact change"
                 ))
-            case .idle, .finished:
-                risks.append(TrustRisk(kind: .buildUnknown, message: "No build result is bound to this exact change"))
+            case .stale:
+                risks.append(TrustRisk(
+                    kind: .verificationStale,
+                    message: "Passing evidence belongs to an earlier change fingerprint"
+                ))
+            case .unconfigured:
+                risks.append(TrustRisk(
+                    kind: .verificationMissing,
+                    message: "No repository verification profile is configured"
+                ))
+            case .untrusted:
+                risks.append(TrustRisk(
+                    kind: .verificationMissing,
+                    message: "Verification commands have not been reviewed and trusted"
+                ))
+            case .missing, .partial:
+                risks.append(TrustRisk(
+                    kind: .verificationMissing,
+                    message: "Required checks are missing for this exact change"
+                ))
+            case .unavailable:
+                appendObservedBuildRisk(build, to: &risks)
             }
         }
         if !paths.isEmpty {
@@ -179,7 +200,7 @@ public actor TrustPacketProvider {
         }
 
         let state: TrustPacketState
-        if !hasWorkingChanges && !paths.isEmpty && ciStatus == .pending {
+        if verification.state == .running {
             state = .verifying
         } else if risks.isEmpty {
             state = .ready
@@ -226,6 +247,28 @@ public actor TrustPacketProvider {
             || lower.contains("permission")
             || lower.contains(".github/workflows")
             || lower.contains("deploy")
+    }
+
+    private func appendObservedBuildRisk(
+        _ build: BuildPulseSnapshot,
+        to risks: inout [TrustRisk]
+    ) {
+        switch build.phase {
+        case .finished where build.lastSucceeded == false:
+            risks.append(TrustRisk(kind: .buildFailed, message: "The last observed build failed"))
+        case .finished where build.lastSucceeded == true:
+            risks.append(TrustRisk(
+                kind: .buildUnknown,
+                message: "A build passed, but it is not bound to this exact change"
+            ))
+        case .running:
+            risks.append(TrustRisk(
+                kind: .buildUnknown,
+                message: "A build is running, but it is not bound to this exact change"
+            ))
+        case .idle, .finished:
+            risks.append(TrustRisk(kind: .buildUnknown, message: "No build result is bound to this exact change"))
+        }
     }
 
     static func nullSeparatedPaths(_ text: String) -> [String] {

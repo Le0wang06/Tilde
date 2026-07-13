@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "base": "origin/main",
+  "checks": [
+    {
+      "id": "tests",
+      "name": "Tests",
+      "command": "./Scripts/test.sh",
+      "required": true,
+      "timeoutSeconds": 900
+    },
+    {
+      "id": "build",
+      "name": "Build",
+      "command": "swift build",
+      "required": true,
+      "timeoutSeconds": 600
+    }
+  ]
+}

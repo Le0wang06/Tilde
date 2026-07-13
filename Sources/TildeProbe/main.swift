@@ -28,13 +28,16 @@ struct TildeProbe {
         }
 
         let currentRoot = Self.gitRoot(at: FileManager.default.currentDirectoryPath)
+        let verification = await VerificationService().snapshot(rootPath: currentRoot)
         let trust = await TrustPacketProvider().snapshot(
             rootPath: currentRoot,
             build: BuildPulseSnapshot(),
             ciStatus: .unknown,
-            behind: nil
+            behind: nil,
+            verification: verification
         )
         print("Trust Packet          \(trust.state.label) (\(trust.summary))")
+        print("Exact Verification    \(verification.state.label) (\(verification.summary))")
 
         if case .available(let codex) = report.codex {
             print("Codex Authentication  \(codex.isAuthenticated ? "Working" : "Required")")
