@@ -39,17 +39,29 @@ Editors edit. Herdr runs agents. **Tilde is the ambient layer between them.**
 
 ## Gallery
 
-<p align="center">
-  <img src="Docs/assets/tilde-menubar.png" alt="Tilde in the macOS menu bar" width="920" />
-</p>
-
-<p align="center"><sub>Always-on menu title — attention, Codex budget, build and thermal signals</sub></p>
+Live captures from the running app (not mockups):
 
 <p align="center">
-  <img src="Docs/assets/tilde-panel-dark.png" alt="Tilde control panel" width="420" />
+  <img src="Docs/assets/tilde-menubar.png" alt="Tilde status item in the macOS menu bar" width="920" />
 </p>
 
-<p align="center"><sub>Compact Control Center–style panel — CPU sparkline, Fan Boost, AI budget, agents, focus</sub></p>
+<p align="center"><sub>Real menu-bar title — attention, Codex budget, and live signals</sub></p>
+
+<p align="center">
+  <img src="Docs/assets/tilde-panel-dark.png" alt="Tilde control panel from the running app" width="360" />
+</p>
+
+<p align="center"><sub>Actual menu-bar panel — agents, CPU/RAM/Fan, AI budget, trust, focus</sub></p>
+
+<p align="center">
+  <img src="Docs/assets/tilde-hero.png" alt="Tilde README hero with live panel" width="920" />
+</p>
+
+Re-capture anytime with:
+
+```sh
+./Scripts/capture-readme-assets.sh
+```
 
 ## What you get
 
