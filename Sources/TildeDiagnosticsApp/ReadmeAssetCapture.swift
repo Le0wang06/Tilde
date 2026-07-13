@@ -25,6 +25,8 @@ enum ReadmeAssetCapture {
         }
         // Let a few live samples fill the sparkline.
         try? await Task.sleep(for: .seconds(3))
+        model.applyReadmeDemoStubs()
+        try? await Task.sleep(for: .milliseconds(200))
 
         let repoRoot = findRepoRoot()
         let outDir = repoRoot.appendingPathComponent("Docs/assets", isDirectory: true)

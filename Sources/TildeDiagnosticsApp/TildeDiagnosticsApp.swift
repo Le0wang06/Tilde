@@ -213,6 +213,7 @@ final class DiagnosticViewModel: ObservableObject {
     private var didRecordAppStart = false
     private var lastLoggedBuildPhase: BuildPulsePhase = .idle
     private var lastLoggedSlowdown: SlowdownSeverity = .none
+    private var freezeIdentityForReadmeCapture = false
     private let menuBarPresentationID = UUID()
 
     init() {
@@ -292,26 +293,28 @@ final class DiagnosticViewModel: ObservableObject {
                 let preferredRoot = self.agentAttention.agents.first(where: { $0.focused })?.projectRoot
                     ?? self.agentAttention.agents.first(where: { $0.state == .working })?.projectRoot
                 let snapshot = await self.projectContextMonitor.snapshot(preferredRoot: preferredRoot)
-                self.projectContext = snapshot
-                self.trustPacket = await self.trustPacketProvider.snapshot(
-                    rootPath: snapshot.rootPath,
-                    build: self.buildPulse,
-                    ciStatus: snapshot.ciStatus,
-                    behind: snapshot.behind
-                )
-                self.recoveryCapsule = await self.recoveryCapsuleStore.update(
-                    project: snapshot,
-                    attention: self.agentAttention,
-                    trust: self.trustPacket,
-                    build: self.buildPulse
-                )
+                if !self.freezeIdentityForReadmeCapture {
+                    self.projectContext = snapshot
+                    self.trustPacket = await self.trustPacketProvider.snapshot(
+                        rootPath: snapshot.rootPath,
+                        build: self.buildPulse,
+                        ciStatus: snapshot.ciStatus,
+                        behind: snapshot.behind
+                    )
+                    self.recoveryCapsule = await self.recoveryCapsuleStore.update(
+                        project: snapshot,
+                        attention: self.agentAttention,
+                        trust: self.trustPacket,
+                        build: self.buildPulse
+                    )
+                }
                 if let report = self.report {
                     self.publishMenuBarTitle(
                         codex: report.codex,
                         cursor: report.cursor,
                         build: self.buildPulse,
                         slowdown: self.slowdown,
-                        project: snapshot,
+                        project: self.projectContext,
                         focus: self.focusMode
                     )
                 }
@@ -323,14 +326,16 @@ final class DiagnosticViewModel: ObservableObject {
             while !Task.isCancelled {
                 guard let self else { break }
                 let refresh = await self.agentAttentionMonitor.refresh()
-                self.agentAttention = refresh.snapshot
-                self.agentAttentionNotifier.post(refresh.events)
-                for event in refresh.events {
-                    self.recordDiary(.init(
-                        kind: event.kind == .needsInput ? .agentNeedsInput : .agentCompleted,
-                        summary: "\(event.agent.projectName) · \(event.agent.state.label)",
-                        detail: "\(event.agent.agent) in \(event.agent.cwd)"
-                    ))
+                if !self.freezeIdentityForReadmeCapture {
+                    self.agentAttention = refresh.snapshot
+                    self.agentAttentionNotifier.post(refresh.events)
+                    for event in refresh.events {
+                        self.recordDiary(.init(
+                            kind: event.kind == .needsInput ? .agentNeedsInput : .agentCompleted,
+                            summary: "\(event.agent.projectName) · \(event.agent.state.label)",
+                            detail: "\(event.agent.agent) in \(event.agent.cwd)"
+                        ))
+                    }
                 }
                 if let report = self.report {
                     self.publishMenuBarTitle(
@@ -345,6 +350,98 @@ final class DiagnosticViewModel: ObservableObject {
                 try? await Task.sleep(for: .seconds(2))
             }
         }
+    }
+
+    /// Replace personal project/agent paths with anonymous demo labels for README captures.
+    func applyReadmeDemoStubs() {
+        freezeIdentityForReadmeCapture = true
+
+        projectContext = ProjectContextSnapshot(
+            projectName: "demo-app",
+            rootPath: "/Users/you/Projects/demo-app",
+            branch: "main",
+            isDirty: true,
+            ahead: 1,
+            behind: 0,
+            ciStatus: .success,
+            ciSummary: "CI · pass"
+        )
+
+        agentAttention = AgentAttentionSnapshot(
+            agents: [
+                AgentAttentionItem(
+                    id: "demo-1",
+                    terminalID: "term-1",
+                    paneID: nil,
+                    workspaceID: nil,
+                    agent: "codex",
+                    state: .idle,
+                    cwd: "/Users/you/Projects/demo-app",
+                    projectRoot: "/Users/you/Projects/demo-app",
+                    projectName: "demo-app",
+                    branch: "main",
+                    focused: true
+                ),
+                AgentAttentionItem(
+                    id: "demo-2",
+                    terminalID: "term-2",
+                    paneID: nil,
+                    workspaceID: nil,
+                    agent: "cursor",
+                    state: .working,
+                    cwd: "/Users/you/Projects/sample-api",
+                    projectRoot: "/Users/you/Projects/sample-api",
+                    projectName: "sample-api",
+                    branch: "feature/hud",
+                    focused: false
+                ),
+                AgentAttentionItem(
+                    id: "demo-3",
+                    terminalID: "term-3",
+                    paneID: nil,
+                    workspaceID: nil,
+                    agent: "codex",
+                    state: .done,
+                    cwd: "/Users/you/Projects/playground",
+                    projectRoot: "/Users/you/Projects/playground",
+                    projectName: "playground",
+                    branch: "main",
+                    focused: false
+                ),
+            ],
+            sampledAt: Date(),
+            providerAvailable: true
+        )
+
+        trustPacket = TrustPacketSnapshot(
+            state: .ready,
+            projectRoot: "/Users/you/Projects/demo-app",
+            changedFiles: 2,
+            additions: 48,
+            deletions: 6
+        )
+
+        recoveryCapsule = RecoveryCapsule(
+            projectRoot: "/Users/you/Projects/demo-app",
+            projectName: "demo-app",
+            branch: "main",
+            headline: "2 files · evidence ready",
+            nextAction: "Review and verify",
+            attentionCount: 0,
+            verificationState: TrustPacketState.ready.rawValue,
+            changedFiles: 2
+        )
+
+        todaySummary = SessionDiaryTodaySummary(
+            eventCount: 6,
+            builds: 1,
+            slowdowns: 0,
+            focusChanges: 1,
+            lastEventSummary: "Focus · Ship"
+        )
+
+        menuBarTitle = "~ Cx 67% · Cr 45%"
+        MenuBarStatusItemController.shared.updateTitle(menuBarTitle)
     }
 
     private func apply(report: DiagnosticReport) {
