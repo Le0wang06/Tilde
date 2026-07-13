@@ -71,6 +71,14 @@ final class MenuBarStatusItemController: NSObject {
         statusItem?.button?.title = title
     }
 
+    func showPopover() {
+        guard let button = statusItem?.button, let popover else { return }
+        model?.startIfNeeded()
+        if !popover.isShown {
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        }
+    }
+
     @objc private func togglePopover(_ sender: Any?) {
         guard let button = statusItem?.button, let popover else { return }
         if popover.isShown {

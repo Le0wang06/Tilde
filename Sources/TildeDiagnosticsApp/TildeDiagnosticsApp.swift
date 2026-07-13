@@ -14,6 +14,7 @@ struct TildeDiagnosticsApp: App {
             model.startIfNeeded()
             TildeAppDelegate.shared?.model = model
             MenuBarStatusItemController.shared.install(model: model)
+            ReadmeAssetCapture.runIfRequested(model: model)
         }
     }
 
@@ -994,33 +995,45 @@ struct MenuBarPanel: View {
                 .padding(.top, 10)
                 .padding(.bottom, 6)
 
-            ScrollView(.vertical, showsIndicators: true) {
-                VStack(spacing: 8) {
-                    if model.slowdown.severity != .none {
-                        slowdownBanner
-                    }
-
-                    if let report = model.report {
-                        metricGrid(report)
-                        actionRow
-                    } else {
-                        ProgressView("Collecting…")
-                            .controlSize(.small)
-                            .frame(maxWidth: .infinity, minHeight: 80)
+            Group {
+                if ReadmeAssetCapture.isRequested {
+                    panelContent
+                } else {
+                    ScrollView(.vertical, showsIndicators: true) {
+                        panelContent
                     }
                 }
-                .padding(.horizontal, 10)
-                .padding(.bottom, 10)
             }
         }
         .frame(width: panelWidth)
-        .frame(maxHeight: maxPanelHeight)
+        .frame(maxHeight: ReadmeAssetCapture.isRequested ? .infinity : maxPanelHeight)
+        .fixedSize(horizontal: true, vertical: ReadmeAssetCapture.isRequested)
         .background {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(.ultraThinMaterial)
         }
         .onAppear { model.setPresentation(presentationID, isActive: true) }
         .onDisappear { model.setPresentation(presentationID, isActive: false) }
+    }
+
+    @ViewBuilder
+    private var panelContent: some View {
+        VStack(spacing: 8) {
+            if model.slowdown.severity != .none {
+                slowdownBanner
+            }
+
+            if let report = model.report {
+                metricGrid(report)
+                actionRow
+            } else {
+                ProgressView("Collecting…")
+                    .controlSize(.small)
+                    .frame(maxWidth: .infinity, minHeight: 80)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.bottom, 10)
     }
 
     private var header: some View {
