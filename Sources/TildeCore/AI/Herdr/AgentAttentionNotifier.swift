@@ -17,7 +17,9 @@ public final class AgentAttentionNotifier {
                 ? "Tilde · Agent needs you"
                 : "Tilde · Ready to review"
             content.body = "\(event.agent.projectName) · \(event.agent.agent.capitalized)"
-            content.sound = event.kind == .needsInput ? .default : nil
+            // Sound on every attention transition — blocked and ready-to-review
+            // both mean the human should notice.
+            content.sound = .default
             content.userInfo = ["terminalID": event.agent.terminalID]
 
             let request = UNNotificationRequest(

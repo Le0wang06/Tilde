@@ -336,6 +336,7 @@ final class DiagnosticViewModel: ObservableObject {
                 if !self.freezeIdentityForReadmeCapture {
                     self.agentAttention = refresh.snapshot
                     self.agentAttentionNotifier.post(refresh.events)
+                    AttentionSoundPlayer.play(for: refresh.events)
                     for event in refresh.events {
                         self.recordDiary(.init(
                             kind: event.kind == .needsInput ? .agentNeedsInput : .agentCompleted,
@@ -538,8 +539,8 @@ final class DiagnosticViewModel: ObservableObject {
             lastEventSummary: "Focus · Ship"
         )
 
-        menuBarTitle = "≈$4.38"
-        MenuBarStatusItemController.shared.updateTitle(menuBarTitle)
+        menuBarTitle = "! ≈$4.38"
+        MenuBarStatusItemController.shared.updateTitle(menuBarTitle, needsAttention: true)
     }
 
     private func apply(report: DiagnosticReport) {
@@ -587,27 +588,36 @@ final class DiagnosticViewModel: ObservableObject {
         project: ProjectContextSnapshot,
         focus: FocusMode
     ) {
+        let needsAttention = agentAttention.attentionCount > 0
         menuBarTitle = Self.makeMenuBarTitle(
             from: codex,
-            cursor: cursor
+            cursor: cursor,
+            needsAttention: needsAttention
         )
-        MenuBarStatusItemController.shared.updateTitle(menuBarTitle)
+        MenuBarStatusItemController.shared.updateTitle(menuBarTitle, needsAttention: needsAttention)
         NotificationCenter.default.post(
             name: .tildeMenuBarTitleDidChange,
             object: nil,
-            userInfo: ["title": menuBarTitle]
+            userInfo: [
+                "title": menuBarTitle,
+                "needsAttention": needsAttention,
+            ]
         )
     }
 
     private static func makeMenuBarTitle(
         from codex: Availability<CodexDiagnosticSnapshot>,
-        cursor: Availability<CursorUsageSnapshot>
+        cursor: Availability<CursorUsageSnapshot>,
+        needsAttention: Bool = false
     ) -> String {
         let spend = DailyAISpendSummary(
             codex: codex.availableValue?.dailySpend,
             cursor: cursor.availableValue?.dailySpend
         )
-        return spend.menuBarText
+        return MenuBarAttentionTitle.compose(
+            spendText: spend.menuBarText,
+            needsAttention: needsAttention
+        )
     }
 
     func applyFocusMode(_ mode: FocusMode) {

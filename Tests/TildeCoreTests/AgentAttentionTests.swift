@@ -2,6 +2,12 @@ import Foundation
 import Testing
 @testable import TildeCore
 
+@Test func menuBarAttentionTitlePrefixesExclamationOnlyWhenNeeded() {
+    #expect(MenuBarAttentionTitle.compose(spendText: "$1.23", needsAttention: false) == "$1.23")
+    #expect(MenuBarAttentionTitle.compose(spendText: "≈$4.38", needsAttention: true) == "! ≈$4.38")
+    #expect(MenuBarAttentionTitle.compose(spendText: "$—", needsAttention: true) == "! $—")
+}
+
 @Test func herdrAgentListParsesAttentionAndProjectIdentity() throws {
     let json = #"""
     {
