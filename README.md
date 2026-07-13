@@ -213,6 +213,7 @@ verification process group on cancellation or timeout.
 
 ## Docs
 
+- [Cursor Handoff](CURSOR_HANDOFF.md) — complete product context, repository state, and next implementation
 - [AI Control Plane](Docs/AI-Control-Plane.md) — promise, shipped slice, next steps  
 - [Phase 0 Feasibility](Docs/Phase-0-Feasibility.md) — measured results and limits  
 - [Contribution workflow](AGENTS.md)
