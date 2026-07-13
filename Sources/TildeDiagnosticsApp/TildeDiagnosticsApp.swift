@@ -384,9 +384,10 @@ final class DiagnosticViewModel: ObservableObject {
                 dailySpend: DailySpendReading(
                     provider: .codex,
                     cents: 126,
-                    basis: .providerReported,
+                    basis: .estimatedFromTokenBreakdown,
                     observedFrom: Calendar.current.startOfDay(for: Date())
                 ),
+                estimatedCreditsToday: 31.5,
                 lifetimeTokens: nil,
                 threadCount: 3,
                 notes: []
@@ -537,7 +538,7 @@ final class DiagnosticViewModel: ObservableObject {
             lastEventSummary: "Focus · Ship"
         )
 
-        menuBarTitle = "~ $4.38 today"
+        menuBarTitle = "~ ≈$4.38+ today"
         MenuBarStatusItemController.shared.updateTitle(menuBarTitle)
     }
 
@@ -1690,14 +1691,20 @@ struct MenuBarPanel: View {
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(.secondary)
                     Spacer(minLength: 4)
-                    Text(spend.knownTotalCents.map(DailyAISpendSummary.usd) ?? "$—")
+                    Text(spend.knownTotalCents.map {
+                        "\(spend.containsEstimate ? "≈" : "")\(DailyAISpendSummary.usd($0))"
+                    } ?? "$—")
                         .font(.title3.weight(.semibold).monospacedDigit())
                 }
                 Text(spend.detailText)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
-                if !spend.hasCompleteProviderCoverage, spend.knownTotalCents != nil {
+                if spend.containsEstimate {
+                    Text("Estimate · official credit rates + local token mix")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                } else if !spend.hasCompleteProviderCoverage, spend.knownTotalCents != nil {
                     Text("Lower bound · missing provider or pre-tracking spend")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)

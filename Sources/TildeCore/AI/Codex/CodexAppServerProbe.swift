@@ -37,6 +37,7 @@ private final class CodexOutputCollector: @unchecked Sendable {
 
 public actor CodexAppServerProbe: MetricProvider {
     private let environment: [String: String]
+    private let localUsageProbe = CodexLocalUsageProbe()
 
     public init(environment: [String: String] = ProcessInfo.processInfo.environment) {
         self.environment = environment
@@ -45,13 +46,17 @@ public actor CodexAppServerProbe: MetricProvider {
     public func fetchSnapshot() async throws -> CodexDiagnosticSnapshot {
         try Task.checkCancellation()
         let environment = self.environment
+        let localUsageProbe = self.localUsageProbe
         return try await Task.detached(priority: .utility) {
             try Task.checkCancellation()
-            return try Self.runProbe(environment: environment)
+            return try Self.runProbe(environment: environment, localUsageProbe: localUsageProbe)
         }.value
     }
 
-    private static func runProbe(environment: [String: String]) throws -> CodexDiagnosticSnapshot {
+    private static func runProbe(
+        environment: [String: String],
+        localUsageProbe: CodexLocalUsageProbe
+    ) throws -> CodexDiagnosticSnapshot {
         guard let executablePath = CodexExecutableLocator.locate(environment: environment) else {
             throw MetricError.executableNotFound("Codex")
         }
@@ -127,14 +132,18 @@ public actor CodexAppServerProbe: MetricProvider {
         return try parseResponses(
             String(decoding: stdout, as: UTF8.self),
             executablePath: executablePath,
-            version: version
+            version: version,
+            environment: environment,
+            localUsageProbe: localUsageProbe
         )
     }
 
     private static func parseResponses(
         _ output: String,
         executablePath: String,
-        version: String
+        version: String,
+        environment: [String: String],
+        localUsageProbe: CodexLocalUsageProbe
     ) throws -> CodexDiagnosticSnapshot {
         var responses: [Int: [String: Any]] = [:]
         for line in output.split(whereSeparator: \.isNewline) {
@@ -166,12 +175,25 @@ public actor CodexAppServerProbe: MetricProvider {
         let today = localDateString()
         let todayBucket = dailyBuckets?.first(where: { ($0["startDate"] as? String)?.prefix(10) == today })
         let tokensToday = todayBucket?["tokens"] as? Int
-        let dailySpend = ExplicitMonetaryValueParser.cents(in: todayBucket).map {
+        let explicitDailySpend = ExplicitMonetaryValueParser.cents(in: todayBucket).map {
             DailySpendReading(
                 provider: .codex,
                 cents: $0,
                 basis: .providerReported,
                 observedFrom: Date()
+            )
+        }
+        let localBreakdown = localUsageProbe.todayBreakdown(environment: environment)
+        let costEstimate = CodexCostEstimator.estimate(
+            reportedTokens: tokensToday,
+            breakdown: localBreakdown
+        )
+        let dailySpend = explicitDailySpend ?? costEstimate.map {
+            DailySpendReading(
+                provider: .codex,
+                cents: $0.cents,
+                basis: .estimatedFromTokenBreakdown,
+                observedFrom: Calendar.current.startOfDay(for: Date())
             )
         }
 
@@ -183,6 +205,15 @@ public actor CodexAppServerProbe: MetricProvider {
         if usageResult == nil { notes.append(responseNote(responses[4], fallback: "Codex token usage is unavailable for this account or CLI version")) }
         if usageResult != nil, dailyBuckets == nil { notes.append("Codex returned usage summary data without daily token buckets") }
         if dailyBuckets != nil, tokensToday == nil { notes.append("Codex returned no token bucket for the current local date") }
+        if explicitDailySpend == nil, let costEstimate {
+            notes.append(
+                "Codex daily cost is an estimate from \(costEstimate.locallyClassifiedTokens) local classified tokens, "
+                    + "cross-checked against \(costEstimate.reportedTokens) reported activity tokens with the "
+                    + "\(CodexCostEstimator.rateCardVersion) credit rate card."
+            )
+        } else if tokensToday != nil, dailySpend == nil {
+            notes.append("Codex daily tokens could not be priced because no supported local model breakdown was available")
+        }
         if threadResult == nil { notes.append(responseNote(responses[5], fallback: "Codex thread inventory is unavailable")) }
 
         return CodexDiagnosticSnapshot(
@@ -195,6 +226,7 @@ public actor CodexAppServerProbe: MetricProvider {
             secondaryLimit: secondary,
             tokensToday: tokensToday,
             dailySpend: dailySpend,
+            estimatedCreditsToday: costEstimate?.credits,
             lifetimeTokens: summary?["lifetimeTokens"] as? Int,
             threadCount: threads?.count,
             notes: notes

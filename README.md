@@ -69,7 +69,7 @@ Re-capture anytime with:
 | --- | --- |
 | **System HUD** | CPU sparkline, RAM pressure, disk, network, thermal slowdown alerts |
 | **Fan Boost** | Real SMC fan control via `tilde-fan` (admin password once per login) |
-| **AI spend** | Daily Cursor + Codex monetary total in the menu bar; provider limits remain one tap away |
+| **AI spend** | Daily Cursor usage + Codex credit-equivalent estimate in the menu bar; limits remain one tap away |
 | **Agent attention** | Herdr inventory, blockers first, one-click focus back to the terminal |
 | **Exact verification** | Explicit repository checks bound to the full Git fingerprint; stale immediately after a change |
 | **Trust packet** | Deterministic Git / exact receipts / CI evidence — no opaque “AI confidence” |
@@ -163,9 +163,10 @@ Tilde is **local-first**. It does **not** store:
 - terminal output  
 - auth tokens or account email  
 
-The daily-spend ledger stores monetary counters and observation timestamps only. A trailing `+` in the
-menu bar means the value is a truthful lower bound because a provider or earlier part of the day was not
-reported; Tilde never estimates dollars from token counts or percentages.
+The daily-spend ledger stores monetary counters and observation timestamps only. Codex cost estimation
+reads only local model and token-count events (input, cached input, and output); prompt and response
+content is ignored and no Codex token data is persisted. `≈` marks a credit-equivalent estimate and a
+trailing `+` marks a lower bound. Tilde never prices an undifferentiated token total or percentage.
 
 Recovery capsules keep only path, branch, attention counts, verification state, and a next-action hint under Application Support.
 Verification receipts keep only repository/worktree/profile/fingerprint hashes, Git object IDs, check

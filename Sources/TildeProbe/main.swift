@@ -45,7 +45,13 @@ struct TildeProbe {
             for window in codex.rateLimitWindows {
                 print("Codex \(window.kind.compactLabel) Window   \(window.remainingPercent)% left")
             }
-            print("Codex Tokens Today    \(codex.tokensToday == nil ? "Unavailable" : "Working")")
+            print("Codex Tokens Today    \(codex.tokensToday.map(String.init) ?? "Unavailable")")
+            if let spend = codex.dailySpend {
+                print("Codex Cost Today      \(DailyAISpendSummary.usd(spend.cents)) \(spend.basis == .estimatedFromTokenBreakdown ? "estimated" : "reported")")
+            }
+            if let estimateNote = codex.notes.first(where: { $0.hasPrefix("Codex daily cost is an estimate") }) {
+                print("Codex Cost Basis      \(estimateNote)")
+            }
             print("Codex Threads         \(codex.threadCount == nil ? "Unavailable" : "Working")")
             for note in codex.notes {
                 print("Codex Note            \(note)")

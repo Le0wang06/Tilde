@@ -17,6 +17,8 @@ public enum DailySpendBasis: String, Codable, Sendable {
     case providerReported
     /// Tilde calculated a delta from a cumulative monetary meter it observed locally.
     case locallyObservedDelta
+    /// Tilde converted a model-specific token breakdown through an official credit rate card.
+    case estimatedFromTokenBreakdown
 }
 
 public struct DailySpendReading: Codable, Equatable, Sendable {
@@ -58,10 +60,15 @@ public struct DailyAISpendSummary: Equatable, Sendable {
         codex?.basis == .providerReported && cursor?.basis == .providerReported
     }
 
+    public var containsEstimate: Bool {
+        [codex, cursor].compactMap { $0 }.contains { $0.basis == .estimatedFromTokenBreakdown }
+    }
+
     public var menuBarText: String {
         guard let knownTotalCents else { return "$— today" }
+        let estimate = containsEstimate ? "≈" : ""
         let lowerBound = hasCompleteProviderCoverage ? "" : "+"
-        return "\(Self.usd(knownTotalCents))\(lowerBound) today"
+        return "\(estimate)\(Self.usd(knownTotalCents))\(lowerBound) today"
     }
 
     public var detailText: String {
@@ -76,8 +83,14 @@ public struct DailyAISpendSummary: Equatable, Sendable {
 
     private func providerDetail(_ provider: AISpendProvider, reading: DailySpendReading?) -> String {
         guard let reading else { return "\(provider.label) not reported" }
-        let qualifier = reading.basis == .locallyObservedDelta ? " observed" : ""
-        return "\(provider.label) \(Self.usd(reading.cents))\(qualifier)"
+        switch reading.basis {
+        case .providerReported:
+            return "\(provider.label) \(Self.usd(reading.cents))"
+        case .locallyObservedDelta:
+            return "\(provider.label) \(Self.usd(reading.cents)) observed"
+        case .estimatedFromTokenBreakdown:
+            return "\(provider.label) ≈\(Self.usd(reading.cents))"
+        }
     }
 }
 
