@@ -74,7 +74,7 @@ enum AttentionBannerSmokeTest {
 
         let postError: String? = await withCheckedContinuation { cont in
             let content = UNMutableNotificationContent()
-            content.title = AttentionBannerCopy.title(for: event.kind)
+            content.title = AttentionBannerCopy.title(for: event.kind, state: event.agent.state)
             content.subtitle = "Tilde"
             content.body = AttentionBannerCopy.body(for: event.agent)
             content.sound = .default

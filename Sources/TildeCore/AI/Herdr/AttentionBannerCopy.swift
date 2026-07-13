@@ -2,10 +2,13 @@ import Foundation
 
 /// Shared copy for UserNotifications banners (side-of-screen alerts).
 public enum AttentionBannerCopy {
-    public static func title(for kind: AgentAttentionEventKind) -> String {
+    public static func title(for kind: AgentAttentionEventKind, state: AgentAttentionState = .done) -> String {
         switch kind {
-        case .needsInput: return "Agent needs you"
-        case .completed: return "Ready to review"
+        case .needsInput:
+            return "Agent needs you"
+        case .completed:
+            // Herdr uses `done` for review-ready work and `idle` for finished turns.
+            return state == .done ? "Ready to review" : "Agent finished"
         }
     }
 

@@ -357,7 +357,11 @@ final class DiagnosticViewModel: ObservableObject {
                         focus: self.focusMode
                     )
                 }
-                try? await Task.sleep(for: .seconds(2))
+                // Poll faster while an agent is working so short Q&A turns
+                // aren't missed between samples (Herdr flips working→idle quickly).
+                try? await Task.sleep(
+                    for: .milliseconds(refresh.snapshot.workingCount > 0 ? 500 : 2000)
+                )
             }
         }
     }

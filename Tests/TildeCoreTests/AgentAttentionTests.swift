@@ -10,14 +10,17 @@ import Testing
 
 @Test func attentionBannerCopyDescribesNeedsInputAndReview() {
     let blocked = makeAgent(id: "a", state: .blocked, project: "demo-app")
+    let idle = makeAgent(id: "b", state: .idle, project: "demo-app")
     #expect(AttentionBannerCopy.title(for: .needsInput) == "Agent needs you")
-    #expect(AttentionBannerCopy.title(for: .completed) == "Ready to review")
+    #expect(AttentionBannerCopy.title(for: .completed, state: .done) == "Ready to review")
+    #expect(AttentionBannerCopy.title(for: .completed, state: .idle) == "Agent finished")
     #expect(AttentionBannerCopy.body(for: blocked) == "demo-app · main · Codex")
     #expect(
         AttentionBannerCopy.requestID(
             for: AgentAttentionEvent(kind: .needsInput, agent: blocked)
         ) == "tilde-agent-needsInput-a"
     )
+    #expect(idle.state == .idle)
 }
 
 @Test func herdrAgentListParsesAttentionAndProjectIdentity() throws {
@@ -81,6 +84,33 @@ import Testing
     #expect(snapshot.displayItems.map(\.id) == ["blocked", "done", "working", "idle", "unknown"])
     #expect(snapshot.displayItems.contains { $0.state == .idle })
     #expect(snapshot.attentionCount == 2)
+}
+
+@Test func attentionMonitorReportsFinishedTurnWhenWorkingBecomesIdle() async {
+    let queue = AttentionSnapshotQueue([
+        AgentAttentionSnapshot(
+            agents: [makeAgent(id: "agent", state: .idle)],
+            providerAvailable: true
+        ),
+        AgentAttentionSnapshot(
+            agents: [makeAgent(id: "agent", state: .working)],
+            providerAvailable: true
+        ),
+        AgentAttentionSnapshot(
+            agents: [makeAgent(id: "agent", state: .idle)],
+            providerAvailable: true
+        ),
+    ])
+    let monitor = AgentAttentionMonitor { await queue.next() }
+
+    let baseline = await monitor.refresh()
+    let working = await monitor.refresh()
+    let finished = await monitor.refresh()
+
+    #expect(baseline.events.isEmpty)
+    #expect(working.events.isEmpty)
+    #expect(finished.events.map(\.kind) == [.completed])
+    #expect(finished.events.first?.agent.state == .idle)
 }
 
 @Test func attentionMonitorSuppressesInitialAlertsAndReportsTransitions() async {
