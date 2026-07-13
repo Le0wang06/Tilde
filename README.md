@@ -71,7 +71,8 @@ Re-capture anytime with:
 | **Fan Boost** | Real SMC fan control via `tilde-fan` (admin password once per login) |
 | **AI budget** | Codex ⇄ Cursor remaining % in one tap-to-cycle card |
 | **Agent attention** | Herdr inventory, blockers first, one-click focus back to the terminal |
-| **Trust packet** | Deterministic Git / build / CI evidence — no opaque “AI confidence” |
+| **Exact verification** | Explicit repository checks bound to the full Git fingerprint; stale immediately after a change |
+| **Trust packet** | Deterministic Git / exact receipts / CI evidence — no opaque “AI confidence” |
 | **Recovery** | Per-project capsule (metadata only) so you can resume cleanly |
 | **Focus modes** | Ship · Meet · Battery presets |
 | **Today diary** | Local JSONL of builds, focus, slowdowns, agent events |
@@ -161,6 +162,37 @@ Tilde is **local-first**. It does **not** store:
 - auth tokens or account email  
 
 Recovery capsules keep only path, branch, attention counts, verification state, and a next-action hint under Application Support.
+Verification receipts keep only repository/worktree/profile/fingerprint hashes, Git object IDs, check
+IDs and names, timestamps, durations, outcomes, and exit statuses. Command output remains ephemeral
+and is never written to the receipt store.
+
+## Exact verification profiles
+
+Tilde never guesses or automatically runs repository commands. A repository can declare a reviewable
+`.tilde/verify.json`; Tilde shows every command and requires an explicit **Trust & Run** click for that
+repository and exact profile hash. Changing the profile requires trust again. After a run, **Clear &
+Hide** deletes that worktree's stored receipt and hides the card until the fingerprint changes.
+
+```json
+{
+  "version": 1,
+  "base": "origin/main",
+  "checks": [
+    {
+      "id": "tests",
+      "name": "Tests",
+      "command": "./Scripts/test.sh",
+      "required": true,
+      "timeoutSeconds": 900
+    }
+  ]
+}
+```
+
+A receipt becomes stale when the base tip, merge base, `HEAD`, staged diff, unstaged diff, untracked
+path/mode/size/content, dirty submodule state, or profile changes. Tilde requires two identical complete
+fingerprint samples before using one, scopes receipts to the current worktree, and terminates the full
+verification process group on cancellation or timeout.
 
 ## Repo layout
 

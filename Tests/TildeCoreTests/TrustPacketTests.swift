@@ -98,6 +98,34 @@ import Testing
     #expect(snapshot.additions == 1)
 }
 
+@Test func exactVerificationSupersedesUnboundBuildObservation() async throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("tilde-trust-receipt-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    try runGit(["init", "-b", "main"], in: root)
+    try "initial\n".write(to: root.appendingPathComponent("App.swift"), atomically: true, encoding: .utf8)
+    try runGit(["add", "App.swift"], in: root)
+    try runGit(["-c", "user.name=Tilde Tests", "-c", "user.email=tilde@example.invalid", "commit", "-m", "Initial"], in: root)
+    try runGit(["switch", "-c", "feature/verified"], in: root)
+    try "verified change\n".write(to: root.appendingPathComponent("App.swift"), atomically: true, encoding: .utf8)
+    try runGit(["add", "App.swift"], in: root)
+    try runGit(["-c", "user.name=Tilde Tests", "-c", "user.email=tilde@example.invalid", "commit", "-m", "Verified"], in: root)
+
+    let snapshot = await TrustPacketProvider().snapshot(
+        rootPath: root.path,
+        build: BuildPulseSnapshot(),
+        ciStatus: .success,
+        behind: nil,
+        verification: VerificationSnapshot(state: .verified, projectRoot: root.path)
+    )
+
+    #expect(!snapshot.risks.contains { $0.kind == .buildUnknown })
+    #expect(!snapshot.risks.contains { $0.kind == .verificationMissing })
+    #expect(snapshot.state == .ready)
+}
+
 private enum GitTestError: Error {
     case failed(arguments: [String], status: Int32)
 }

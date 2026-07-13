@@ -191,6 +191,7 @@ final class DiagnosticViewModel: ObservableObject {
     @Published private(set) var todaySummary = SessionDiaryTodaySummary.empty
     @Published private(set) var agentAttention = AgentAttentionSnapshot.unavailable
     @Published private(set) var trustPacket = TrustPacketSnapshot.unavailable
+    @Published private(set) var verification = VerificationSnapshot.unavailable
     @Published private(set) var recoveryCapsule: RecoveryCapsule?
     private let liveMonitoring = LiveMonitoringService()
     private let fanBoostController = FanBoostController()
@@ -202,6 +203,7 @@ final class DiagnosticViewModel: ObservableObject {
     private let agentAttentionMonitor: AgentAttentionMonitor
     private let agentAttentionNotifier = AgentAttentionNotifier()
     private let trustPacketProvider = TrustPacketProvider()
+    private let verificationService = VerificationService()
     private let recoveryCapsuleStore = RecoveryCapsuleStore()
     private var historyBuffer = LiveMetricHistory()
     private var subscriptionTask: Task<Void, Never>?
@@ -209,6 +211,7 @@ final class DiagnosticViewModel: ObservableObject {
     private var projectContextTask: Task<Void, Never>?
     private var speedWriteTask: Task<Void, Never>?
     private var agentAttentionTask: Task<Void, Never>?
+    private var verificationRunTask: Task<Void, Never>?
     private var didAskNotificationAuth = false
     private var didRecordAppStart = false
     private var lastLoggedBuildPhase: BuildPulsePhase = .idle
@@ -295,11 +298,15 @@ final class DiagnosticViewModel: ObservableObject {
                 let snapshot = await self.projectContextMonitor.snapshot(preferredRoot: preferredRoot)
                 if !self.freezeIdentityForReadmeCapture {
                     self.projectContext = snapshot
+                    self.verification = await self.verificationService.snapshot(
+                        rootPath: snapshot.rootPath
+                    )
                     self.trustPacket = await self.trustPacketProvider.snapshot(
                         rootPath: snapshot.rootPath,
                         build: self.buildPulse,
                         ciStatus: snapshot.ciStatus,
-                        behind: snapshot.behind
+                        behind: snapshot.behind,
+                        verification: self.verification
                     )
                     self.recoveryCapsule = await self.recoveryCapsuleStore.update(
                         project: snapshot,
@@ -443,26 +450,63 @@ final class DiagnosticViewModel: ObservableObject {
         )
 
         trustPacket = TrustPacketSnapshot(
-            state: .needsVerification,
+            state: .ready,
             projectRoot: "/Users/you/Projects/demo-app",
             changedFiles: 2,
             additions: 48,
             deletions: 6,
-            comparisonBase: "main",
-            risks: [TrustRisk(
-                kind: .buildUnknown,
-                message: "No build result is bound to this exact change"
-            )]
+            comparisonBase: "main"
+        )
+        let demoProfile = VerificationProfile(
+            base: "origin/main",
+            checks: [
+                VerificationCheck(id: "tests", name: "Tests", command: "./Scripts/test.sh"),
+                VerificationCheck(id: "build", name: "Build", command: "swift build"),
+            ]
+        )
+        let demoReceipts = demoProfile.checks.map { check in
+            CheckReceipt(
+                checkID: check.id,
+                checkName: check.name,
+                commandHash: "demo",
+                required: true,
+                startedAt: Date().addingTimeInterval(-20),
+                finishedAt: Date(),
+                duration: check.id == "tests" ? 12.4 : 4.8,
+                exitStatus: 0,
+                outcome: .passed
+            )
+        }
+        verification = VerificationSnapshot(
+            state: .verified,
+            projectRoot: "/Users/you/Projects/demo-app",
+            changeSet: ChangeSet(
+                repositoryID: "demo",
+                worktreeID: "demo-worktree",
+                worktreePath: "/Users/you/Projects/demo-app",
+                baseRef: "origin/main",
+                baseOID: "base",
+                mergeBaseOID: "merge-base",
+                headOID: "head",
+                changedFiles: 2,
+                fingerprint: ChangeFingerprint(value: "a1b2c3d4demo")
+            ),
+            loadedProfile: LoadedVerificationProfile(
+                profile: demoProfile,
+                profileHash: "demo-profile",
+                filePath: "/Users/you/Projects/demo-app/.tilde/verify.json"
+            ),
+            receipts: demoReceipts
         )
 
         recoveryCapsule = RecoveryCapsule(
             projectRoot: "/Users/you/Projects/demo-app",
             projectName: "demo-app",
             branch: "main",
-            headline: "1 check · 2 files vs main",
-            nextAction: "Review and verify",
+            headline: "2 checks passed · exact change",
+            nextAction: "Review the exact verified change",
             attentionCount: 0,
-            verificationState: TrustPacketState.needsVerification.rawValue,
+            verificationState: TrustPacketState.ready.rawValue,
             changedFiles: 2
         )
 
@@ -530,7 +574,8 @@ final class DiagnosticViewModel: ObservableObject {
             slowdown: slowdown,
             project: project,
             focus: focus,
-            attention: agentAttention
+            attention: agentAttention,
+            verification: verification
         )
         MenuBarStatusItemController.shared.updateTitle(menuBarTitle)
         NotificationCenter.default.post(
@@ -547,7 +592,8 @@ final class DiagnosticViewModel: ObservableObject {
         slowdown: SlowdownAdvice,
         project: ProjectContextSnapshot,
         focus: FocusMode,
-        attention: AgentAttentionSnapshot
+        attention: AgentAttentionSnapshot,
+        verification: VerificationSnapshot
     ) -> String {
         let cx: String
         if case .available(let snapshot) = codex, let window = snapshot.menuBarLimit {
@@ -567,6 +613,11 @@ final class DiagnosticViewModel: ObservableObject {
         let attentionCount = attention.attentionCount
         if attentionCount > 0 {
             title = "~ !\(attentionCount) · Cx\(cx)"
+        }
+        if verification.state == .failed || verification.state == .stale {
+            title = "~ ! · Cx\(cx)"
+        } else if verification.state == .running {
+            title += " · V…"
         }
         if build.phase == .running {
             title += " · ⚒"
@@ -615,6 +666,58 @@ final class DiagnosticViewModel: ObservableObject {
             for app in NSWorkspace.shared.runningApplications where app.bundleIdentifier == bundleID {
                 app.terminate()
             }
+        }
+    }
+
+    func runVerification(trustingProfile: Bool = false) {
+        guard verificationRunTask == nil,
+              let root = projectContext.rootPath,
+              let expectedProfileHash = verification.loadedProfile?.profileHash else { return }
+        verification.state = .running
+        verification.activeCheckName = nil
+        verification.message = nil
+        verificationRunTask = Task { [weak self] in
+            guard let self else { return }
+            let result: VerificationSnapshot
+            do {
+                result = try await verificationService.run(
+                    rootPath: root,
+                    trustingProfile: trustingProfile,
+                    expectedProfileHash: expectedProfileHash
+                )
+            } catch {
+                var retryable = await verificationService.snapshot(rootPath: root)
+                retryable.message = error.localizedDescription
+                result = retryable
+            }
+            guard !Task.isCancelled else { return }
+            verification = result
+            verificationRunTask = nil
+        }
+    }
+
+    func cancelVerification() {
+        Task {
+            await verificationService.cancel()
+        }
+    }
+
+    func clearVerificationResult() {
+        guard verificationRunTask == nil,
+              let root = projectContext.rootPath else { return }
+        verificationRunTask = Task { [weak self] in
+            guard let self else { return }
+            let result: VerificationSnapshot
+            do {
+                result = try await verificationService.clearReceipt(rootPath: root)
+            } catch {
+                var retryable = await verificationService.snapshot(rootPath: root)
+                retryable.message = error.localizedDescription
+                result = retryable
+            }
+            guard !Task.isCancelled else { return }
+            verification = result
+            verificationRunTask = nil
         }
     }
 
@@ -1219,6 +1322,9 @@ struct MenuBarPanel: View {
             if model.agentAttention.providerAvailable, !model.agentAttention.agents.isEmpty {
                 attentionCard
             }
+            if model.verification.state != .dismissed {
+                verificationCard
+            }
             HStack(alignment: .top, spacing: 8) {
                 cpuCard(report)
                 memoryCard(report)
@@ -1290,6 +1396,177 @@ struct MenuBarPanel: View {
                         .foregroundStyle(.secondary)
                 }
             }
+        }
+    }
+
+    private var verificationCard: some View {
+        let snapshot = model.verification
+        let tint = verificationTint(snapshot.state)
+        return ControlCenterCard {
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(spacing: 6) {
+                    Image(systemName: verificationSymbol(snapshot.state))
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(tint)
+                    Text("EXACT VERIFICATION")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 4)
+                    Text(snapshot.state.label.uppercased())
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(tint)
+                }
+
+                Text(snapshot.summary)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+
+                if let message = snapshot.message,
+                   snapshot.state != .unavailable {
+                    Text(message)
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                        .lineLimit(2)
+                        .help(message)
+                }
+
+                if let changeSet = snapshot.changeSet {
+                    Text("\(changeSet.baseRef) · fingerprint \(changeSet.fingerprint.shortValue)")
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                if snapshot.state == .stale,
+                   let record = snapshot.record {
+                    Text("Previous proof · \(record.fingerprint.shortValue) · head \(record.headOID.prefix(8))")
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                if snapshot.state == .untrusted,
+                   let checks = snapshot.loadedProfile?.profile.checks {
+                    Text("Review these repository commands before allowing execution:")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    ForEach(checks) { check in
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(check.name)
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(.secondary)
+                            Text("$ \(check.command)")
+                                .font(.caption2.monospaced())
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+
+                if !snapshot.receipts.isEmpty,
+                   snapshot.state != .stale {
+                    ForEach(snapshot.receipts) { receipt in
+                        HStack(spacing: 5) {
+                            Image(systemName: receipt.outcome == .passed
+                                  ? "checkmark.circle.fill"
+                                  : "xmark.circle.fill")
+                                .foregroundStyle(receipt.outcome == .passed ? Color.green : Color.red)
+                            Text(receipt.checkName)
+                            Spacer(minLength: 4)
+                            Text("\(receipt.duration.formatted(.number.precision(.fractionLength(1))))s")
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                        }
+                        .font(.caption2)
+                    }
+                }
+
+                if let output = snapshot.outputExcerpt,
+                   snapshot.state == .failed || snapshot.state == .partial {
+                    Text(output)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .help(output)
+                }
+
+                verificationAction(snapshot)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func verificationAction(_ snapshot: VerificationSnapshot) -> some View {
+        switch snapshot.state {
+        case .untrusted:
+            Button("Trust & Run \(snapshot.loadedProfile?.profile.checks.count ?? 0) Commands") {
+                model.runVerification(trustingProfile: true)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .help("Trust this exact repository and profile hash, then run the commands shown above")
+        case .missing:
+            Button("Run Required Checks") {
+                model.runVerification()
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+        case .failed, .partial, .stale:
+            HStack(spacing: 6) {
+                Button(snapshot.state == .stale ? "Run for Current Change" : "Run Required Checks") {
+                    model.runVerification()
+                }
+                .buttonStyle(.borderedProminent)
+                Button("Clear & Hide") {
+                    model.clearVerificationResult()
+                }
+                .buttonStyle(.bordered)
+                .help("Delete this worktree's receipt and hide the card until the change moves")
+            }
+            .controlSize(.small)
+        case .verified:
+            HStack(spacing: 6) {
+                Button("Run Again") {
+                    model.runVerification()
+                }
+                .buttonStyle(.bordered)
+                Button("Clear & Hide") {
+                    model.clearVerificationResult()
+                }
+                .buttonStyle(.bordered)
+                .help("Delete this worktree's receipt and hide the card until the change moves")
+            }
+            .controlSize(.small)
+        case .running:
+            Button("Cancel Checks", role: .cancel) {
+                model.cancelVerification()
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        case .unavailable, .unconfigured, .dismissed:
+            EmptyView()
+        }
+    }
+
+    private func verificationTint(_ state: VerificationState) -> Color {
+        switch state {
+        case .verified: return .green
+        case .running: return .blue
+        case .failed: return .red
+        case .stale, .untrusted, .missing, .partial: return .orange
+        case .unavailable, .unconfigured, .dismissed: return .secondary
+        }
+    }
+
+    private func verificationSymbol(_ state: VerificationState) -> String {
+        switch state {
+        case .verified: return "checkmark.seal.fill"
+        case .running: return "clock.badge.checkmark"
+        case .failed: return "xmark.seal.fill"
+        case .stale: return "clock.badge.exclamationmark"
+        case .untrusted: return "lock.shield"
+        case .missing, .partial: return "exclamationmark.shield"
+        case .unavailable, .unconfigured, .dismissed: return "shield"
         }
     }
 
@@ -1732,6 +2009,13 @@ struct MenuBarPanel: View {
 
     private var statusText: String {
         if model.runState == .running { return "Monitoring" }
+        switch model.verification.state {
+        case .failed: return "Exact verification failed"
+        case .stale: return "Verification evidence is stale"
+        case .running: return "Running exact verification"
+        case .untrusted: return "Review verification profile"
+        default: break
+        }
         if model.agentAttention.attentionCount > 0 {
             let count = model.agentAttention.attentionCount
             return "\(count) agent\(count == 1 ? " needs" : "s need") you"
@@ -1746,6 +2030,12 @@ struct MenuBarPanel: View {
     }
 
     private var panelStatusColor: Color {
+        if model.verification.state == .failed { return .red }
+        if model.verification.state == .stale || model.verification.state == .untrusted {
+            return .orange
+        }
+        if model.verification.state == .running { return .blue }
+        if model.verification.state == .verified { return .green }
         if model.agentAttention.attentionCount > 0 { return .orange }
         guard let report = model.report else { return .secondary }
         if report.system.thermalState == .critical { return .red }
