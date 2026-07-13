@@ -30,11 +30,33 @@ final class AttentionBannerCenter: NSObject, UNUserNotificationCenterDelegate {
             options: []
         )
         center.setNotificationCategories([category])
-        center.requestAuthorization(options: [.alert, .sound]) { granted, error in
-            if let error {
-                NSLog("Tilde notification authorization error: \(error.localizedDescription)")
-            } else if !granted {
-                NSLog("Tilde notification authorization denied — side banners will not appear")
+        requestAuthorizationVisibly()
+    }
+
+    /// Menu-bar / LSUIElement apps often never show the Allow sheet unless
+    /// they briefly become a normal activating app first.
+    private func requestAuthorizationVisibly() {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            guard settings.authorizationStatus == .notDetermined else { return }
+            Task { @MainActor in
+                NSApp.setActivationPolicy(.regular)
+                NSApp.activate(ignoringOtherApps: true)
+                try? await Task.sleep(for: .milliseconds(200))
+                do {
+                    // Prefer a real prompt; fall back to provisional so banners can
+                    // still land quietly if the sheet never appears for LSUIElement.
+                    let granted = try await UNUserNotificationCenter.current()
+                        .requestAuthorization(options: [.alert, .sound])
+                    if !granted {
+                        _ = try? await UNUserNotificationCenter.current()
+                            .requestAuthorization(options: [.alert, .sound, .provisional])
+                    }
+                } catch {
+                    NSLog("Tilde notification authorization error: \(error.localizedDescription)")
+                    _ = try? await UNUserNotificationCenter.current()
+                        .requestAuthorization(options: [.alert, .sound, .provisional])
+                }
+                NSApp.setActivationPolicy(.accessory)
             }
         }
     }

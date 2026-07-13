@@ -15,6 +15,7 @@ struct TildeDiagnosticsApp: App {
             TildeAppDelegate.shared?.model = model
             AttentionBannerCenter.shared.install(model: model)
             MenuBarStatusItemController.shared.install(model: model)
+            AttentionBannerSmokeTest.runIfRequested(model: model)
             ReadmeAssetCapture.runIfRequested(model: model)
         }
     }
