@@ -236,12 +236,19 @@ enum ReadmeAssetCapture {
         ]
         name.draw(at: NSPoint(x: brandX, y: brandY - 78), withAttributes: nameAttrs)
 
-        let caption = "Menu-bar command center for agents & machines" as NSString
+        let caption = "Know what needs you next — without leaving flow" as NSString
         let capAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 24, weight: .medium),
-            .foregroundColor: NSColor.white.withAlphaComponent(0.55),
+            .font: NSFont.systemFont(ofSize: 22, weight: .medium),
+            .foregroundColor: NSColor.white.withAlphaComponent(0.58),
         ]
         caption.draw(at: NSPoint(x: brandX, y: brandY - 120), withAttributes: capAttrs)
+
+        let pitch = "Agents · exact checks · spend · machine health" as NSString
+        let pitchAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 16, weight: .regular),
+            .foregroundColor: NSColor.white.withAlphaComponent(0.38),
+        ]
+        pitch.draw(at: NSPoint(x: brandX, y: brandY - 152), withAttributes: pitchAttrs)
 
         let maxPanelHeight = size.height * 0.78
         let scale = min(380 / panel.size.width, maxPanelHeight / panel.size.height)

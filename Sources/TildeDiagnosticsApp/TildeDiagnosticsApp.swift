@@ -437,11 +437,11 @@ final class DiagnosticViewModel: ObservableObject {
         }
 
         projectContext = ProjectContextSnapshot(
-            projectName: "demo-app",
-            rootPath: "/Users/you/Projects/demo-app",
-            branch: "main",
+            projectName: "checkout-api",
+            rootPath: "/Users/you/Projects/checkout-api",
+            branch: "feature/payments",
             isDirty: true,
-            ahead: 1,
+            ahead: 2,
             behind: 0,
             ciStatus: .success,
             ciSummary: "CI · pass"
@@ -455,11 +455,11 @@ final class DiagnosticViewModel: ObservableObject {
                     paneID: nil,
                     workspaceID: nil,
                     agent: "codex",
-                    state: .idle,
-                    cwd: "/Users/you/Projects/demo-app",
-                    projectRoot: "/Users/you/Projects/demo-app",
-                    projectName: "demo-app",
-                    branch: "main",
+                    state: .done,
+                    cwd: "/Users/you/Projects/checkout-api",
+                    projectRoot: "/Users/you/Projects/checkout-api",
+                    projectName: "checkout-api",
+                    branch: "feature/payments",
                     focused: true
                 ),
                 AgentAttentionItem(
@@ -469,9 +469,9 @@ final class DiagnosticViewModel: ObservableObject {
                     workspaceID: nil,
                     agent: "cursor",
                     state: .working,
-                    cwd: "/Users/you/Projects/sample-api",
-                    projectRoot: "/Users/you/Projects/sample-api",
-                    projectName: "sample-api",
+                    cwd: "/Users/you/Projects/storefront",
+                    projectRoot: "/Users/you/Projects/storefront",
+                    projectName: "storefront",
                     branch: "feature/hud",
                     focused: false
                 ),
@@ -481,10 +481,10 @@ final class DiagnosticViewModel: ObservableObject {
                     paneID: nil,
                     workspaceID: nil,
                     agent: "codex",
-                    state: .done,
-                    cwd: "/Users/you/Projects/playground",
-                    projectRoot: "/Users/you/Projects/playground",
-                    projectName: "playground",
+                    state: .idle,
+                    cwd: "/Users/you/Projects/billing-worker",
+                    projectRoot: "/Users/you/Projects/billing-worker",
+                    projectName: "billing-worker",
                     branch: "main",
                     focused: false
                 ),
@@ -495,10 +495,10 @@ final class DiagnosticViewModel: ObservableObject {
 
         trustPacket = TrustPacketSnapshot(
             state: .ready,
-            projectRoot: "/Users/you/Projects/demo-app",
-            changedFiles: 2,
-            additions: 48,
-            deletions: 6,
+            projectRoot: "/Users/you/Projects/checkout-api",
+            changedFiles: 4,
+            additions: 128,
+            deletions: 19,
             comparisonBase: "main"
         )
         let demoProfile = VerificationProfile(
@@ -523,43 +523,52 @@ final class DiagnosticViewModel: ObservableObject {
         }
         verification = VerificationSnapshot(
             state: .verified,
-            projectRoot: "/Users/you/Projects/demo-app",
+            projectRoot: "/Users/you/Projects/checkout-api",
             changeSet: ChangeSet(
                 repositoryID: "demo",
                 worktreeID: "demo-worktree",
-                worktreePath: "/Users/you/Projects/demo-app",
+                worktreePath: "/Users/you/Projects/checkout-api",
                 baseRef: "origin/main",
                 baseOID: "base",
                 mergeBaseOID: "merge-base",
                 headOID: "head",
-                changedFiles: 2,
+                changedFiles: 4,
                 fingerprint: ChangeFingerprint(value: "a1b2c3d4demo")
             ),
             loadedProfile: LoadedVerificationProfile(
                 profile: demoProfile,
                 profileHash: "demo-profile",
-                filePath: "/Users/you/Projects/demo-app/.tilde/verify.json"
+                filePath: "/Users/you/Projects/checkout-api/.tilde/verify.json"
             ),
             receipts: demoReceipts
         )
 
         recoveryCapsule = RecoveryCapsule(
-            projectRoot: "/Users/you/Projects/demo-app",
-            projectName: "demo-app",
-            branch: "main",
+            projectRoot: "/Users/you/Projects/checkout-api",
+            projectName: "checkout-api",
+            branch: "feature/payments",
             headline: "2 checks passed · exact change",
             nextAction: "Review the exact verified change",
-            attentionCount: 0,
+            attentionCount: 1,
             verificationState: TrustPacketState.ready.rawValue,
-            changedFiles: 2
+            changedFiles: 4
         )
 
         todaySummary = SessionDiaryTodaySummary(
-            eventCount: 6,
-            builds: 1,
+            eventCount: 11,
+            builds: 3,
             slowdowns: 0,
-            focusChanges: 1,
-            lastEventSummary: "Focus · Ship"
+            focusChanges: 2,
+            lastEventSummary: "Agent finished · checkout-api"
+        )
+
+        buildPulse = BuildPulseSnapshot(
+            phase: .finished,
+            kind: .other,
+            commandSummary: "Tests",
+            finishedAt: Date().addingTimeInterval(-90),
+            lastDuration: 12.4,
+            lastSucceeded: true
         )
 
         menuBarTitle = "! ≈$4.38"
