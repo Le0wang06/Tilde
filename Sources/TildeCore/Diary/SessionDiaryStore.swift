@@ -40,6 +40,20 @@ public struct SessionDiaryTodaySummary: Sendable, Equatable {
     public var focusChanges: Int
     public var lastEventSummary: String?
 
+    public init(
+        eventCount: Int,
+        builds: Int,
+        slowdowns: Int,
+        focusChanges: Int,
+        lastEventSummary: String? = nil
+    ) {
+        self.eventCount = eventCount
+        self.builds = builds
+        self.slowdowns = slowdowns
+        self.focusChanges = focusChanges
+        self.lastEventSummary = lastEventSummary
+    }
+
     public static let empty = SessionDiaryTodaySummary(
         eventCount: 0,
         builds: 0,
