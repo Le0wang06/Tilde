@@ -45,6 +45,7 @@ final class TildeAppDelegate: NSObject, NSApplicationDelegate {
         Self.shared = self
         // Stay in the menu bar only — don't steal focus or pop the main window.
         NSApp.setActivationPolicy(.accessory)
+        AppIconSupport.applyApplicationIcon()
         DispatchQueue.main.async {
             for window in NSApp.windows where window.isVisible {
                 window.orderOut(nil)
@@ -337,7 +338,10 @@ final class DiagnosticViewModel: ObservableObject {
                 let refresh = await self.agentAttentionMonitor.refresh()
                 if !self.freezeIdentityForReadmeCapture {
                     self.agentAttention = refresh.snapshot
-                    self.agentAttentionNotifier.post(refresh.events)
+                    self.agentAttentionNotifier.post(
+                        refresh.events,
+                        logoAttachment: AppIconSupport.makeLogoAttachment()
+                    )
                     AttentionSoundPlayer.play(for: refresh.events)
                     for event in refresh.events {
                         self.recordDiary(.init(

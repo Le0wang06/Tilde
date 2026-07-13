@@ -18,6 +18,7 @@ enum AttentionBannerSmokeTest {
     }
 
     private static func run(model: DiagnosticViewModel) async {
+        AppIconSupport.applyApplicationIcon()
         AttentionBannerCenter.shared.install(model: model)
 
         let resultURL = URL(fileURLWithPath: "/tmp/tilde-attention-banner-smoke.txt")
@@ -81,6 +82,9 @@ enum AttentionBannerSmokeTest {
             content.categoryIdentifier = AgentAttentionNotifier.categoryIdentifier
             content.threadIdentifier = "tilde.attention"
             content.userInfo = ["terminalID": agent.terminalID]
+            if let logo = AppIconSupport.makeLogoAttachment() {
+                content.attachments = [logo]
+            }
 
             let request = UNNotificationRequest(
                 identifier: "tilde-smoke-\(UUID().uuidString)",

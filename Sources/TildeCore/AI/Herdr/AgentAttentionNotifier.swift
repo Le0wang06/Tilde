@@ -9,7 +9,10 @@ public final class AgentAttentionNotifier {
 
     public init() {}
 
-    public func post(_ events: [AgentAttentionEvent]) {
+    public func post(
+        _ events: [AgentAttentionEvent],
+        logoAttachment: UNNotificationAttachment? = nil
+    ) {
         guard !events.isEmpty else { return }
         requestAuthorizationIfNeeded()
 
@@ -34,6 +37,9 @@ public final class AgentAttentionNotifier {
                     "kind": event.kind.rawValue,
                     "projectName": event.agent.projectName,
                 ]
+                if let logoAttachment {
+                    content.attachments = [logoAttachment]
+                }
 
                 let request = UNNotificationRequest(
                     identifier: AttentionBannerCopy.requestID(for: event),
