@@ -45,7 +45,7 @@ Live captures from the running app, with project/agent identity and account-usag
   <img src="Docs/assets/tilde-menubar.png" alt="Tilde status item in the macOS menu bar" width="920" />
 </p>
 
-<p align="center"><sub>Real menu-bar title — daily AI spend, attention, and live signals</sub></p>
+<p align="center"><sub>Real menu-bar title — only the daily AI price; details stay one click away</sub></p>
 
 <p align="center">
   <img src="Docs/assets/tilde-panel-dark.png" alt="Tilde control panel from the running app" width="360" />
@@ -69,7 +69,7 @@ Re-capture anytime with:
 | --- | --- |
 | **System HUD** | CPU sparkline, RAM pressure, disk, network, thermal slowdown alerts |
 | **Fan Boost** | Real SMC fan control via `tilde-fan` (admin password once per login) |
-| **AI spend** | Daily Cursor usage + Codex credit-equivalent estimate in the menu bar; limits remain one tap away |
+| **AI spend** | Price-only menu-bar title; Cursor/Codex breakdown, estimate basis, and limits remain one tap away |
 | **Agent attention** | Herdr inventory, blockers first, one-click focus back to the terminal |
 | **Exact verification** | Explicit repository checks bound to the full Git fingerprint; stale immediately after a change |
 | **Trust packet** | Deterministic Git / exact receipts / CI evidence — no opaque “AI confidence” |
@@ -118,7 +118,7 @@ open 'tilde://refresh'
 
 ```mermaid
 flowchart TB
-  MB["Menu bar · ~ title"]
+  MB["Menu bar · AI price only"]
   PN["Compact panel"]
   MB --> PN
 
@@ -165,8 +165,9 @@ Tilde is **local-first**. It does **not** store:
 
 The daily-spend ledger stores monetary counters and observation timestamps only. Codex cost estimation
 reads only local model and token-count events (input, cached input, and output); prompt and response
-content is ignored and no Codex token data is persisted. `≈` marks a credit-equivalent estimate and a
-trailing `+` marks a lower bound. Tilde never prices an undifferentiated token total or percentage.
+content is ignored and no Codex token data is persisted. `≈` marks a credit-equivalent estimate. The
+compact menu-bar title intentionally contains only that price; provider breakdown and basis stay in
+the expanded panel. Tilde never prices an undifferentiated token total or percentage.
 
 Recovery capsules keep only path, branch, attention counts, verification state, and a next-action hint under Application Support.
 Verification receipts keep only repository/worktree/profile/fingerprint hashes, Git object IDs, check
