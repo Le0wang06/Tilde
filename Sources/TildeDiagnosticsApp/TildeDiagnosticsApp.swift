@@ -1342,16 +1342,21 @@ struct MenuBarPanel: View {
 
     @ViewBuilder
     private func metricGrid(_ report: DiagnosticReport) -> some View {
+        let topDecision = model.decisionQueue.topItem
+        let focusingDecision = topDecision?.needsYou == true
+
         VStack(spacing: 8) {
-            if let decision = model.decisionQueue.topItem {
-                decisionCard(decision)
-            }
-            if model.agentAttention.providerAvailable, !model.agentAttention.agents.isEmpty {
+            decisionSection(topDecision)
+
+            if !focusingDecision,
+               model.agentAttention.providerAvailable,
+               !model.agentAttention.agents.isEmpty {
                 attentionCard
             }
-            if model.verification.state != .dismissed {
+            if !focusingDecision, model.verification.state != .dismissed {
                 verificationCard
             }
+
             HStack(alignment: .top, spacing: 8) {
                 cpuCard(report)
                 memoryCard(report)
@@ -1369,64 +1374,148 @@ struct MenuBarPanel: View {
         }
     }
 
+    @ViewBuilder
+    private func decisionSection(_ item: DecisionQueueItem?) -> some View {
+        if let item, item.needsYou {
+            decisionCard(item)
+        } else if let item {
+            decisionIdleStrip(item)
+        } else {
+            decisionEmptyStrip
+        }
+    }
+
     private func decisionCard(_ item: DecisionQueueItem) -> some View {
-        ControlCenterCard {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 6) {
-                    Image(systemName: item.needsYou ? "exclamationmark.circle.fill" : "checkmark.circle")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(item.needsYou ? Color.orange : Color.green)
-                    Text("NEXT")
+        let tint = decisionTint(item)
+        return ControlCenterCard {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("Needs you")
                         .font(.caption2.weight(.bold))
-                        .foregroundStyle(.secondary)
-                    Spacer()
+                        .foregroundStyle(tint)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(tint.opacity(0.14))
+                        )
+                    Spacer(minLength: 4)
                     Text(item.subtitle)
                         .font(.caption2.weight(.semibold))
-                        .foregroundStyle(item.needsYou ? Color.orange : Color.secondary)
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
 
-                Text(item.title)
-                    .font(.caption.weight(.semibold))
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.projectName)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                    Text(item.branch.map { "branch \($0)" } ?? "detached HEAD")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
 
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(item.reasons.prefix(4)) { reason in
-                        HStack(alignment: .top, spacing: 6) {
+                VStack(alignment: .leading, spacing: 5) {
+                    ForEach(item.reasons) { reason in
+                        HStack(alignment: .top, spacing: 7) {
                             Text(reasonGlyph(reason.severity))
-                                .font(.caption.weight(.bold).monospacedDigit())
+                                .font(.caption.weight(.bold))
                                 .foregroundStyle(reasonColor(reason.severity))
-                                .frame(width: 12, alignment: .leading)
+                                .frame(width: 12, alignment: .center)
                             Text(reason.message)
-                                .font(.caption2)
+                                .font(.caption)
                                 .foregroundStyle(.primary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                 }
 
-                HStack(spacing: 6) {
-                    ForEach(item.actions) { action in
-                        Button {
-                            model.performDecisionAction(action, for: item)
-                        } label: {
-                            Text(action.title)
-                                .font(.caption2.weight(.semibold))
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 6)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                        .fill(action.isEnabled
-                                              ? Color.accentColor.opacity(0.18)
-                                              : Color.primary.opacity(0.06))
-                                )
+                if let primary = item.primaryAction {
+                    Button {
+                        model.performDecisionAction(primary, for: item)
+                    } label: {
+                        Text(primary.title)
+                            .font(.caption.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .foregroundStyle(.white)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(tint)
+                            )
+                    }
+                    .buttonStyle(.plain)
+
+                    if !item.secondaryActions.isEmpty {
+                        HStack(spacing: 8) {
+                            ForEach(item.secondaryActions) { action in
+                                Button {
+                                    model.performDecisionAction(action, for: item)
+                                } label: {
+                                    Text(action.title)
+                                        .font(.caption2.weight(.semibold))
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 6)
+                                        .foregroundStyle(.primary)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                                .fill(Color.primary.opacity(0.06))
+                                        )
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
-                        .buttonStyle(.plain)
-                        .disabled(!action.isEnabled)
                     }
                 }
             }
         }
+    }
+
+    private func decisionIdleStrip(_ item: DecisionQueueItem) -> some View {
+        ControlCenterCard {
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.green)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Nothing needs you")
+                        .font(.caption.weight(.semibold))
+                    Text("\(item.projectName) · \(item.subtitle)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                if let primary = item.primaryAction {
+                    Button(primary.title) {
+                        model.performDecisionAction(primary, for: item)
+                    }
+                    .font(.caption2.weight(.semibold))
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var decisionEmptyStrip: some View {
+        ControlCenterCard {
+            HStack(spacing: 8) {
+                Image(systemName: "tray")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text("No active change yet")
+                    .font(.caption.weight(.semibold))
+                Spacer(minLength: 0)
+            }
+        }
+    }
+
+    private func decisionTint(_ item: DecisionQueueItem) -> Color {
+        if item.reasons.contains(where: { $0.severity == .fail }) { return .red }
+        if item.needsYou { return .orange }
+        return .accentColor
     }
 
     private func reasonGlyph(_ severity: DecisionSeverity) -> String {

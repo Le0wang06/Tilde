@@ -73,6 +73,7 @@ public struct DecisionQueueItem: Identifiable, Sendable, Equatable {
     public let agentTerminalIDs: [String]
     public let priority: Int
     public let needsYou: Bool
+    public let primaryActionKind: DecisionActionKind?
 
     public init(
         id: String,
@@ -85,7 +86,8 @@ public struct DecisionQueueItem: Identifiable, Sendable, Equatable {
         actions: [DecisionAction],
         agentTerminalIDs: [String],
         priority: Int,
-        needsYou: Bool
+        needsYou: Bool,
+        primaryActionKind: DecisionActionKind? = nil
     ) {
         self.id = id
         self.title = title
@@ -98,6 +100,18 @@ public struct DecisionQueueItem: Identifiable, Sendable, Equatable {
         self.agentTerminalIDs = agentTerminalIDs
         self.priority = priority
         self.needsYou = needsYou
+        self.primaryActionKind = primaryActionKind ?? actions.first(where: \.isEnabled)?.kind
+    }
+
+    public var primaryAction: DecisionAction? {
+        guard let primaryActionKind else { return actions.first(where: \.isEnabled) }
+        return actions.first(where: { $0.kind == primaryActionKind && $0.isEnabled })
+            ?? actions.first(where: \.isEnabled)
+    }
+
+    public var secondaryActions: [DecisionAction] {
+        guard let primary = primaryAction else { return actions.filter(\.isEnabled) }
+        return actions.filter { $0.id != primary.id && $0.isEnabled }
     }
 }
 

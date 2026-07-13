@@ -82,23 +82,22 @@ public enum DecisionQueueComposer {
         let priority = priority(for: bucket, reasons: reasons)
         let needsYou = priority <= 5
         let subtitle = subtitle(for: bucket, priority: priority)
-        let branchLabel = bucket.branch ?? "detached"
-        let title = "\(bucket.projectName) · \(branchLabel)"
-        let terminalIDs = bucket.agents.map(\.terminalID)
         let actions = actions(for: bucket)
+        let primary = primaryActionKind(priority: priority, actions: actions)
 
         return DecisionQueueItem(
             id: canonicalize(bucket.worktreePath),
-            title: title,
+            title: bucket.projectName,
             subtitle: subtitle,
             projectName: bucket.projectName,
             branch: bucket.branch,
             worktreePath: bucket.worktreePath,
             reasons: reasons,
             actions: actions,
-            agentTerminalIDs: terminalIDs,
+            agentTerminalIDs: bucket.agents.map(\.terminalID),
             priority: priority,
-            needsYou: needsYou
+            needsYou: needsYou,
+            primaryActionKind: primary
         )
     }
 
@@ -109,14 +108,14 @@ public enum DecisionQueueComposer {
             reasons.append(.init(
                 kind: .agentBlocked,
                 severity: .fail,
-                message: "Agent is blocked and waiting for input"
+                message: "Agent needs your input"
             ))
         }
         if bucket.agents.contains(where: { $0.state == .done }) {
             reasons.append(.init(
                 kind: .agentReady,
                 severity: .warn,
-                message: "Agent marked this change ready to review"
+                message: "Ready for your review"
             ))
         }
 
@@ -125,37 +124,37 @@ public enum DecisionQueueComposer {
             reasons.append(.init(
                 kind: .verificationPassed,
                 severity: .pass,
-                message: "Exact checks passed for this change"
+                message: "Tests passed for this exact change"
             ))
         case .failed:
             reasons.append(.init(
                 kind: .verificationFailed,
                 severity: .fail,
-                message: bucket.verification.summary
+                message: "Checks failed for this exact change"
             ))
         case .stale:
             reasons.append(.init(
                 kind: .verificationStale,
                 severity: .warn,
-                message: "Previously verified evidence is stale for this change"
+                message: "Evidence is stale — change moved"
             ))
         case .missing:
             reasons.append(.init(
                 kind: .verificationMissing,
                 severity: .warn,
-                message: "Required checks have not run for this exact change"
+                message: "Checks have not run for this change"
             ))
         case .untrusted:
             reasons.append(.init(
                 kind: .verificationUntrusted,
                 severity: .warn,
-                message: "Verification profile needs trust before checks can run"
+                message: "Trust the verify profile to run checks"
             ))
         case .running:
             reasons.append(.init(
                 kind: .verificationRunning,
                 severity: .info,
-                message: bucket.verification.summary
+                message: "Checks are running…"
             ))
         case .unavailable, .unconfigured, .dismissed, .partial:
             break
@@ -211,7 +210,20 @@ public enum DecisionQueueComposer {
             ))
         }
 
-        return Array(reasons.prefix(5))
+        // Surface failures/warnings first; keep the card scannable.
+        let ranked = reasons.sorted { lhs, rhs in
+            severityRank(lhs.severity) < severityRank(rhs.severity)
+        }
+        return Array(ranked.prefix(3))
+    }
+
+    private static func severityRank(_ severity: DecisionSeverity) -> Int {
+        switch severity {
+        case .fail: return 0
+        case .warn: return 1
+        case .pass: return 2
+        case .info: return 3
+        }
     }
 
     private static func priority(for bucket: Bucket, reasons: [DecisionReason]) -> Int {
@@ -244,16 +256,16 @@ public enum DecisionQueueComposer {
 
     private static func actions(for bucket: Bucket) -> [DecisionAction] {
         var actions: [DecisionAction] = [
-            .init(kind: .reviewChange, title: "Review Change"),
+            .init(kind: .reviewChange, title: "Review"),
         ]
 
         switch bucket.verification.state {
         case .untrusted:
-            actions.append(.init(kind: .trustProfile, title: "Trust Profile"))
+            actions.append(.init(kind: .trustProfile, title: "Trust"))
         case .missing, .failed, .stale, .partial, .verified, .dismissed:
             actions.append(.init(kind: .runChecks, title: "Run Checks"))
         case .running:
-            actions.append(.init(kind: .runChecks, title: "Run Checks", isEnabled: false))
+            actions.append(.init(kind: .runChecks, title: "Running…", isEnabled: false))
         case .unavailable, .unconfigured:
             break
         }
@@ -263,6 +275,22 @@ public enum DecisionQueueComposer {
         }
 
         return actions
+    }
+
+    private static func primaryActionKind(priority: Int, actions: [DecisionAction]) -> DecisionActionKind? {
+        let enabled = Set(actions.filter(\.isEnabled).map(\.kind))
+        let preferred: [DecisionActionKind]
+        switch priority {
+        case 0:
+            preferred = [.openAgent, .reviewChange, .runChecks, .trustProfile]
+        case 1, 2, 3:
+            preferred = [.runChecks, .trustProfile, .reviewChange, .openAgent]
+        case 4, 5, 7:
+            preferred = [.reviewChange, .openAgent, .runChecks, .trustProfile]
+        default:
+            preferred = [.reviewChange, .openAgent, .runChecks, .trustProfile]
+        }
+        return preferred.first(where: { enabled.contains($0) })
     }
 
     private static func canonicalize(_ path: String) -> String {

@@ -125,10 +125,11 @@ struct DecisionQueueTests {
             ], providerAvailable: true)
         )
         let messages = queue.topItem?.reasons.map(\.message) ?? []
-        #expect(messages.contains("Exact checks passed for this change"))
+        // Warn/fail reasons win the 3-slot budget over the pass line.
+        #expect(messages.contains("Ready for your review"))
         #expect(messages.contains("Authentication files changed"))
         #expect(messages.contains("CI has not run for this commit"))
-        #expect(queue.topItem?.actions.contains(where: { $0.kind == .reviewChange }) == true)
+        #expect(queue.topItem?.primaryAction?.kind == .reviewChange)
         #expect(queue.topItem?.actions.contains(where: { $0.kind == .runChecks }) == true)
         #expect(queue.topItem?.actions.contains(where: { $0.kind == .openAgent }) == true)
     }
