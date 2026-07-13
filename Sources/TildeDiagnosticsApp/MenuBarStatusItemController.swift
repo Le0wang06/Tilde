@@ -18,7 +18,7 @@ final class MenuBarStatusItemController: NSObject {
         if statusItem == nil {
             let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
             item.button?.font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
-            item.button?.toolTip = "Tilde — remaining allowance and tokens used today"
+            item.button?.toolTip = "Tilde — daily AI cost"
             item.button?.target = self
             item.button?.action = #selector(togglePopover(_:))
             statusItem = item
@@ -59,7 +59,7 @@ final class MenuBarStatusItemController: NSObject {
                 object: nil,
                 queue: .main
             ) { [weak self] notification in
-                let title = notification.userInfo?["title"] as? String ?? "~ …"
+                let title = notification.userInfo?["title"] as? String ?? "$—"
                 Task { @MainActor in
                     self?.statusItem?.button?.title = title
                 }

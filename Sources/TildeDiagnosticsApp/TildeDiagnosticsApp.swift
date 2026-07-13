@@ -182,7 +182,7 @@ final class DiagnosticViewModel: ObservableObject {
     @Published var runState = DiagnosticRunState.idle
     @Published private(set) var history: [LiveMetricSample] = []
     /// Compact daily AI spend shown in the macOS menu bar title.
-    @Published private(set) var menuBarTitle: String = "~ …"
+    @Published private(set) var menuBarTitle: String = "$—"
     @Published private(set) var fanBoost: FanBoostController.Snapshot = .idle
     @Published private(set) var buildPulse = BuildPulseSnapshot()
     @Published private(set) var slowdown = SlowdownAdvice.none
@@ -538,7 +538,7 @@ final class DiagnosticViewModel: ObservableObject {
             lastEventSummary: "Focus · Ship"
         )
 
-        menuBarTitle = "~ ≈$4.38+ today"
+        menuBarTitle = "≈$4.38+"
         MenuBarStatusItemController.shared.updateTitle(menuBarTitle)
     }
 
@@ -589,13 +589,7 @@ final class DiagnosticViewModel: ObservableObject {
     ) {
         menuBarTitle = Self.makeMenuBarTitle(
             from: codex,
-            cursor: cursor,
-            build: build,
-            slowdown: slowdown,
-            project: project,
-            focus: focus,
-            attention: agentAttention,
-            verification: verification
+            cursor: cursor
         )
         MenuBarStatusItemController.shared.updateTitle(menuBarTitle)
         NotificationCenter.default.post(
@@ -607,45 +601,13 @@ final class DiagnosticViewModel: ObservableObject {
 
     private static func makeMenuBarTitle(
         from codex: Availability<CodexDiagnosticSnapshot>,
-        cursor: Availability<CursorUsageSnapshot>,
-        build: BuildPulseSnapshot,
-        slowdown: SlowdownAdvice,
-        project: ProjectContextSnapshot,
-        focus: FocusMode,
-        attention: AgentAttentionSnapshot,
-        verification: VerificationSnapshot
+        cursor: Availability<CursorUsageSnapshot>
     ) -> String {
         let spend = DailyAISpendSummary(
             codex: codex.availableValue?.dailySpend,
             cursor: cursor.availableValue?.dailySpend
         )
-        var title = "~ \(spend.menuBarText)"
-        let attentionCount = attention.attentionCount
-        if attentionCount > 0 {
-            title = "~ !\(attentionCount) · \(spend.menuBarText)"
-        }
-        if verification.state == .failed || verification.state == .stale {
-            title = "~ ! · \(spend.menuBarText)"
-        } else if verification.state == .running {
-            title += " · V…"
-        }
-        if build.phase == .running {
-            title += " · ⚒"
-        } else if build.phase == .finished {
-            title += " · ✓"
-        }
-        switch slowdown.severity {
-        case .critical:
-            title += " · !!"
-        case .warn:
-            title += " · !"
-        case .none:
-            break
-        }
-        if focus != .off {
-            title += " · \(focus.title)"
-        }
-        return title
+        return spend.menuBarText
     }
 
     func applyFocusMode(_ mode: FocusMode) {

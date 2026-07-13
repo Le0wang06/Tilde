@@ -83,12 +83,12 @@ import Testing
     let unavailable = DailyAISpendSummary(codex: nil, cursor: nil)
 
     #expect(complete.knownTotalCents == 438)
-    #expect(complete.menuBarText == "$4.38 today")
+    #expect(complete.menuBarText == "$4.38")
     #expect(partial.knownTotalCents == 155)
-    #expect(partial.menuBarText == "$1.55+ today")
+    #expect(partial.menuBarText == "$1.55+")
     #expect(partial.detailText == "Cursor $1.55 observed · Codex not reported")
     #expect(unavailable.knownTotalCents == nil)
-    #expect(unavailable.menuBarText == "$— today")
+    #expect(unavailable.menuBarText == "$—")
 }
 
 @Test func dailySpendSummaryLabelsCodexCostEquivalentAsEstimated() {
@@ -109,7 +109,7 @@ import Testing
     )
 
     #expect(summary.containsEstimate)
-    #expect(summary.menuBarText == "≈$55.38+ today")
+    #expect(summary.menuBarText == "≈$55.38+")
     #expect(summary.detailText == "Cursor $0.00 observed · Codex ≈$55.38")
 }
 

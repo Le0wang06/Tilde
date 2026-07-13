@@ -65,10 +65,10 @@ public struct DailyAISpendSummary: Equatable, Sendable {
     }
 
     public var menuBarText: String {
-        guard let knownTotalCents else { return "$— today" }
+        guard let knownTotalCents else { return "$—" }
         let estimate = containsEstimate ? "≈" : ""
         let lowerBound = hasCompleteProviderCoverage ? "" : "+"
-        return "\(estimate)\(Self.usd(knownTotalCents))\(lowerBound) today"
+        return "\(estimate)\(Self.usd(knownTotalCents))\(lowerBound)"
     }
 
     public var detailText: String {
