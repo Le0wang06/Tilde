@@ -110,3 +110,50 @@ public actor VerificationProfileTrustStore {
         VerificationHash.sha256("\(repositoryID):\(profileHash)")
     }
 }
+
+public actor VerificationDismissalStore {
+    private let fileURL: URL
+    private var dismissals: [String: String]?
+
+    public init(fileURL: URL? = nil) {
+        self.fileURL = fileURL ?? VerificationReceiptStore.defaultURL(filename: "verification-dismissals.json")
+    }
+
+    public func isDismissed(worktreeID: String, fingerprint: ChangeFingerprint) -> Bool {
+        loadIfNeeded()
+        return dismissals?[worktreeID] == fingerprint.value
+    }
+
+    public func dismiss(worktreeID: String, fingerprint: ChangeFingerprint) throws {
+        loadIfNeeded()
+        dismissals?[worktreeID] = fingerprint.value
+        try persist()
+    }
+
+    public func clear(worktreeID: String) throws {
+        loadIfNeeded()
+        guard dismissals?.removeValue(forKey: worktreeID) != nil else { return }
+        try persist()
+    }
+
+    private func loadIfNeeded() {
+        guard dismissals == nil else { return }
+        guard let data = try? Data(contentsOf: fileURL),
+              let decoded = try? JSONDecoder().decode([String: String].self, from: data) else {
+            dismissals = [:]
+            return
+        }
+        dismissals = decoded
+    }
+
+    private func persist() throws {
+        guard let dismissals else { return }
+        try FileManager.default.createDirectory(
+            at: fileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(dismissals).write(to: fileURL, options: .atomic)
+    }
+}

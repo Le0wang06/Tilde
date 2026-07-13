@@ -109,9 +109,11 @@ import Testing
     defer { try? FileManager.default.removeItem(at: storeDirectory) }
     let receiptURL = storeDirectory.appendingPathComponent("receipts.json")
     let trustURL = storeDirectory.appendingPathComponent("trust.json")
+    let dismissalURL = storeDirectory.appendingPathComponent("dismissals.json")
     let service = VerificationService(
         receiptStore: VerificationReceiptStore(fileURL: receiptURL),
-        trustStore: VerificationProfileTrustStore(fileURL: trustURL)
+        trustStore: VerificationProfileTrustStore(fileURL: trustURL),
+        dismissalStore: VerificationDismissalStore(fileURL: dismissalURL)
     )
 
     let before = await service.snapshot(rootPath: root.path)
@@ -150,9 +152,17 @@ import Testing
     #expect(stale.state == .stale)
 
     let cleared = try await service.clearReceipt(rootPath: root.path)
-    #expect(cleared.state == .missing)
+    #expect(cleared.state == .dismissed)
+    #expect(await service.snapshot(rootPath: root.path).state == .dismissed)
     let clearedStore = try String(contentsOf: receiptURL, encoding: .utf8)
     #expect(!clearedStore.contains(verified.changeSet?.worktreeID ?? "missing-worktree"))
+
+    try "changed after dismissal\n".write(
+        to: root.appendingPathComponent("App.swift"),
+        atomically: true,
+        encoding: .utf8
+    )
+    #expect(await service.snapshot(rootPath: root.path).state == .missing)
 }
 
 @Test func trustAndRunRejectsAProfileChangedAfterReview() async throws {
@@ -167,7 +177,8 @@ import Testing
     )
     let service = VerificationService(
         receiptStore: VerificationReceiptStore(fileURL: root.appendingPathComponent("receipts.json")),
-        trustStore: VerificationProfileTrustStore(fileURL: root.appendingPathComponent("trust.json"))
+        trustStore: VerificationProfileTrustStore(fileURL: root.appendingPathComponent("trust.json")),
+        dismissalStore: VerificationDismissalStore(fileURL: root.appendingPathComponent("dismissals.json"))
     )
     let displayed = await service.snapshot(rootPath: root.path)
     let displayedHash = try #require(displayed.loadedProfile?.profileHash)
@@ -215,7 +226,8 @@ import Testing
     defer { try? FileManager.default.removeItem(at: storage) }
     let service = VerificationService(
         receiptStore: VerificationReceiptStore(fileURL: storage.appendingPathComponent("receipts.json")),
-        trustStore: VerificationProfileTrustStore(fileURL: storage.appendingPathComponent("trust.json"))
+        trustStore: VerificationProfileTrustStore(fileURL: storage.appendingPathComponent("trust.json")),
+        dismissalStore: VerificationDismissalStore(fileURL: storage.appendingPathComponent("dismissals.json"))
     )
     let first = await service.snapshot(rootPath: root.path)
     let hash = try #require(first.loadedProfile?.profileHash)

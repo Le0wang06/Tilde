@@ -5,6 +5,7 @@ public actor VerificationService {
     private let fingerprintProvider: ChangeFingerprintProvider
     private let receiptStore: VerificationReceiptStore
     private let trustStore: VerificationProfileTrustStore
+    private let dismissalStore: VerificationDismissalStore
     private let runner: VerificationCommandRunner
     private var runningWorktreeID: String?
     private var activeCheckName: String?
@@ -14,12 +15,14 @@ public actor VerificationService {
         fingerprintProvider: ChangeFingerprintProvider = ChangeFingerprintProvider(),
         receiptStore: VerificationReceiptStore = VerificationReceiptStore(),
         trustStore: VerificationProfileTrustStore = VerificationProfileTrustStore(),
+        dismissalStore: VerificationDismissalStore = VerificationDismissalStore(),
         runner: VerificationCommandRunner = VerificationCommandRunner()
     ) {
         self.profileLoader = profileLoader
         self.fingerprintProvider = fingerprintProvider
         self.receiptStore = receiptStore
         self.trustStore = trustStore
+        self.dismissalStore = dismissalStore
         self.runner = runner
     }
 
@@ -51,12 +54,17 @@ public actor VerificationService {
                 profileHash: loadedProfile.profileHash
             )
             let record = await receiptStore.record(for: changeSet.worktreeID)
+            let dismissed = await dismissalStore.isDismissed(
+                worktreeID: changeSet.worktreeID,
+                fingerprint: changeSet.fingerprint
+            )
             return snapshot(
                 rootPath: rootPath,
                 changeSet: changeSet,
                 loadedProfile: loadedProfile,
                 record: record,
-                trusted: trusted
+                trusted: trusted,
+                dismissed: dismissed
             )
         } catch {
             return VerificationSnapshot(
@@ -121,6 +129,7 @@ public actor VerificationService {
             profileHash: loadedProfile.profileHash,
             receipts: result.receipts
         )
+        try await dismissalStore.clear(worktreeID: changeSet.worktreeID)
         try await receiptStore.save(record)
 
         guard let currentProfile = try profileLoader.load(from: rootPath) else {
@@ -163,6 +172,10 @@ public actor VerificationService {
             throw VerificationError.runInProgress
         }
         try await receiptStore.clear(worktreeID: changeSet.worktreeID)
+        try await dismissalStore.dismiss(
+            worktreeID: changeSet.worktreeID,
+            fingerprint: changeSet.fingerprint
+        )
         let trusted = await trustStore.isTrusted(
             repositoryID: changeSet.repositoryID,
             profileHash: loadedProfile.profileHash
@@ -172,7 +185,8 @@ public actor VerificationService {
             changeSet: changeSet,
             loadedProfile: loadedProfile,
             record: nil,
-            trusted: trusted
+            trusted: trusted,
+            dismissed: true
         )
     }
 
@@ -185,7 +199,8 @@ public actor VerificationService {
         changeSet: ChangeSet,
         loadedProfile: LoadedVerificationProfile,
         record: VerificationRecord?,
-        trusted: Bool
+        trusted: Bool,
+        dismissed: Bool = false
     ) -> VerificationSnapshot {
         guard trusted else {
             return VerificationSnapshot(
@@ -197,7 +212,7 @@ public actor VerificationService {
         }
         guard let record else {
             return VerificationSnapshot(
-                state: .missing,
+                state: dismissed ? .dismissed : .missing,
                 projectRoot: rootPath,
                 changeSet: changeSet,
                 loadedProfile: loadedProfile

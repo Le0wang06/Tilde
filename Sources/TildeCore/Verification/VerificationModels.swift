@@ -193,6 +193,7 @@ public enum VerificationState: String, Sendable, Equatable {
     case unconfigured
     case untrusted
     case missing
+    case dismissed
     case running
     case failed
     case partial
@@ -205,6 +206,7 @@ public enum VerificationState: String, Sendable, Equatable {
         case .unconfigured: return "No profile"
         case .untrusted: return "Review profile"
         case .missing: return "Checks missing"
+        case .dismissed: return "Hidden"
         case .running: return "Checks running"
         case .failed: return "Checks failed"
         case .partial: return "Evidence partial"
@@ -263,6 +265,7 @@ public struct VerificationSnapshot: Sendable, Equatable {
         case .missing:
             let count = loadedProfile?.profile.checks.filter(\.required).count ?? 0
             return "\(count) required check\(count == 1 ? "" : "s") missing"
+        case .dismissed: return "Hidden until this change moves"
         case .running: return activeCheckName.map { "Running \($0)…" } ?? state.label
         case .failed:
             return receipts.first(where: { $0.outcome == .failed || $0.outcome == .timedOut })?

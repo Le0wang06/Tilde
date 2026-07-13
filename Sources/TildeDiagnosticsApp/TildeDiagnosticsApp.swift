@@ -1322,7 +1322,9 @@ struct MenuBarPanel: View {
             if model.agentAttention.providerAvailable, !model.agentAttention.agents.isEmpty {
                 attentionCard
             }
-            verificationCard
+            if model.verification.state != .dismissed {
+                verificationCard
+            }
             HStack(alignment: .top, spacing: 8) {
                 cpuCard(report)
                 memoryCard(report)
@@ -1515,11 +1517,11 @@ struct MenuBarPanel: View {
                     model.runVerification()
                 }
                 .buttonStyle(.borderedProminent)
-                Button("Clear Result") {
+                Button("Clear & Hide") {
                     model.clearVerificationResult()
                 }
                 .buttonStyle(.bordered)
-                .help("Delete the stored verification receipt for this worktree")
+                .help("Delete this worktree's receipt and hide the card until the change moves")
             }
             .controlSize(.small)
         case .verified:
@@ -1528,11 +1530,11 @@ struct MenuBarPanel: View {
                     model.runVerification()
                 }
                 .buttonStyle(.bordered)
-                Button("Clear Result") {
+                Button("Clear & Hide") {
                     model.clearVerificationResult()
                 }
                 .buttonStyle(.bordered)
-                .help("Delete the stored verification receipt for this worktree")
+                .help("Delete this worktree's receipt and hide the card until the change moves")
             }
             .controlSize(.small)
         case .running:
@@ -1541,7 +1543,7 @@ struct MenuBarPanel: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
-        case .unavailable, .unconfigured:
+        case .unavailable, .unconfigured, .dismissed:
             EmptyView()
         }
     }
@@ -1552,7 +1554,7 @@ struct MenuBarPanel: View {
         case .running: return .blue
         case .failed: return .red
         case .stale, .untrusted, .missing, .partial: return .orange
-        case .unavailable, .unconfigured: return .secondary
+        case .unavailable, .unconfigured, .dismissed: return .secondary
         }
     }
 
@@ -1564,7 +1566,7 @@ struct MenuBarPanel: View {
         case .stale: return "clock.badge.exclamationmark"
         case .untrusted: return "lock.shield"
         case .missing, .partial: return "exclamationmark.shield"
-        case .unavailable, .unconfigured: return "shield"
+        case .unavailable, .unconfigured, .dismissed: return "shield"
         }
     }
 

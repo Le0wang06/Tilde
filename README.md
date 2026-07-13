@@ -170,8 +170,8 @@ and is never written to the receipt store.
 
 Tilde never guesses or automatically runs repository commands. A repository can declare a reviewable
 `.tilde/verify.json`; Tilde shows every command and requires an explicit **Trust & Run** click for that
-repository and exact profile hash. Changing the profile requires trust again. After a run, **Clear
-Result** deletes that worktree's stored receipt and returns the card to its ready-to-run state.
+repository and exact profile hash. Changing the profile requires trust again. After a run, **Clear &
+Hide** deletes that worktree's stored receipt and hides the card until the fingerprint changes.
 
 ```json
 {

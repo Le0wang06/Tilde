@@ -164,7 +164,7 @@ public actor TrustPacketProvider {
                     kind: .verificationMissing,
                     message: "Verification commands have not been reviewed and trusted"
                 ))
-            case .missing, .partial:
+            case .missing, .dismissed, .partial:
                 risks.append(TrustRisk(
                     kind: .verificationMissing,
                     message: "Required checks are missing for this exact change"
