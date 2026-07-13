@@ -1,117 +1,178 @@
+# ~
+
 # Tilde
 
-Tilde is a native, local-first macOS command center for system health and AI coding agents.
+<p align="center">
+  <img alt="macOS 14+" src="https://img.shields.io/badge/platform-macOS%2014%2B-111111?style=for-the-badge" />
+  <img alt="Swift 6.1" src="https://img.shields.io/badge/Swift-6.1-F05138?style=for-the-badge&logo=swift&logoColor=white" />
+  <img alt="Local-first" src="https://img.shields.io/badge/privacy-local--first-2ea44f?style=for-the-badge" />
+</p>
 
-Its menu-bar control plane combines machine health with live Herdr agent attention,
-deterministic change-verification evidence, and a private per-project recovery capsule.
+<p align="center">
+  <strong>A native macOS menu-bar command center</strong><br/>
+  for machine health, AI agent attention, and change verification.
+</p>
 
-This repository contains the completed **Phase 0** diagnostic foundation and the first
-AI-control-plane vertical slice. The native menu-bar panel shares system, agent, project,
-verification, and recovery state with the main window.
+<p align="center">
+  <a href="#quick-start"><strong>Quick start</strong></a> ·
+  <a href="#what-you-get"><strong>What you get</strong></a> ·
+  <a href="#deep-links"><strong>Deep links</strong></a> ·
+  <a href="#privacy"><strong>Privacy</strong></a> ·
+  <a href="#docs"><strong>Docs</strong></a>
+</p>
 
-## Requirements
+---
 
-- macOS 14 or later
-- Swift 6.1 or later
-- Full Xcode for normal app development, XCTest, XCUITest, signing, and distribution
-- Codex CLI is optional; system diagnostics still work without it
+## Why Tilde
 
-The current machine has Apple Command Line Tools but not full Xcode. SwiftPM builds work, while XCTest/XCUITest remain blocked until Xcode is installed and selected.
+Most tools either edit code or run agents. Tilde sits in between — always visible, never noisy — and answers four questions:
 
-## Run
-
-```sh
-swift build
-swift run TildeDiagnostics
+```text
+  1  What needs me?     →  blocked / ready agents
+  2  What changed?      →  project context + dirty state
+  3  Is it safe?        →  Git · build · CI evidence
+  4  Where do I resume? →  local recovery capsule
 ```
 
-For `tilde://` deep links (open window, refresh, copy status, open Cursor, focus modes), package and launch as an app so Launch Services registers the URL scheme:
+```text
+┌─────────────────────────────────────────────────────────┐
+│  ~  2 need you · Cx 67% · ⚒ · !                         │
+└─────────────────────────────────────────────────────────┘
+                          │ click
+                          ▼
+┌──────────────────────────────┐
+│  CPU ████▁▂▃   RAM  41%      │
+│  FAN  [boost]  DISK · NET    │
+│  AI · CODEX ⇄ CURSOR         │
+│  AGENTS · need you           │
+│  Trust · Build · Project     │
+│  FOCUS  Ship  Meet  Battery  │
+└──────────────────────────────┘
+```
+
+Editors edit. Herdr runs agents. **Tilde is the ambient attention layer.**
+
+## What you get
+
+| Area | In the menu bar / panel |
+| --- | --- |
+| **System HUD** | CPU sparkline, RAM pressure, disk, network, thermal slowdown alerts |
+| **Fan Boost** | Real SMC fan control via `tilde-fan` (admin password once per login) |
+| **AI budget** | Codex ⇄ Cursor remaining % in one tap-to-cycle card |
+| **Agent attention** | Herdr inventory, blockers first, one-click focus back to the terminal |
+| **Trust packet** | Deterministic Git / build / CI evidence — no opaque “AI confidence” |
+| **Recovery** | Per-project capsule (metadata only) so you can resume cleanly |
+| **Focus modes** | Ship · Meet · Battery presets |
+| **Today diary** | Local JSONL of builds, focus, slowdowns, agent events |
+
+## Quick start
+
+**Needs:** macOS 14+ · Swift 6.1+  
+Xcode is optional for SwiftPM runs; required for XCTest, signing, and distribution.
 
 ```sh
-chmod +x Scripts/run-app.sh
-./Scripts/run-app.sh
+git clone https://github.com/Le0wang06/Tilde.git
+cd Tilde
+swift build
+./Scripts/run-app.sh     # wraps .app + registers tilde://
+```
+
+| Command | What it does |
+| --- | --- |
+| `./Scripts/run-app.sh` | Build, package as `.app`, launch, register URL scheme |
+| `swift run TildeDiagnostics` | Run without packaging |
+| `swift run tilde-probe` | Non-GUI probe / feasibility report |
+| `./Scripts/test.sh` | Calculation + state tests |
+
+## Deep links
+
+After `./Scripts/run-app.sh`:
+
+| URL | Action |
+| --- | --- |
+| `tilde://open` | Open main window |
+| `tilde://refresh` | Force refresh |
+| `tilde://copy-status` | Copy HUD summary |
+| `tilde://open-cursor` | Launch Cursor |
+| `tilde://focus/ship` | Ship mode |
+| `tilde://focus/meet` | Meet mode |
+| `tilde://focus/battery` | Battery mode |
+
+```sh
 open 'tilde://refresh'
 ```
 
-Run the non-GUI feasibility report:
+## How it fits together
 
-```sh
-swift run tilde-probe
+```mermaid
+flowchart TB
+  MB["Menu bar · ~ title"]
+  PN["Compact panel"]
+  MB --> PN
+
+  PN --> LIVE["LiveMonitoringService"]
+  PN --> AG["HerdrAgentProvider"]
+  PN --> TR["Trust / verification"]
+  PN --> FAN["FanBoost + tilde-fan"]
+  PN --> DY["Session diary"]
+
+  LIVE --> CX["Codex"]
+  LIVE --> CR["Cursor"]
+  AG --> HR["Herdr"]
+  TR --> GT["Git / gh"]
+  FAN --> SMC["SMC"]
 ```
 
-Run calculation and state tests:
+Sampling slows when the panel is closed. Manual refresh forces everything. Live samples stay **in memory** — not on disk.
 
-```sh
-./Scripts/test.sh
-```
+<details>
+<summary>Sampling intervals</summary>
 
-## Phase 0 scope
-
-- CPU usage from Mach host counters
-- Memory and swap from Mach and `sysctl`
-- Memory pressure from the current macOS memorystatus pressure level
-- Storage capacity from URL resource values
-- Network rates from interface byte deltas
-- Local IPv4 interface detection
-- Battery and power source from IOKit power-source APIs
-- Thermal state from `ProcessInfo`
-- Explicit unavailable values for CPU temperature, GPU utilization, and fan speed
-- Codex executable/version detection
-- Codex App Server initialization, account, rate-limit, token-usage, and thread-list probes
-- Native AppKit status item with health summary, refresh, open-window, and quit actions
-- Menu bar title shows Codex + Cursor remaining allowance (e.g. `~ Cx 67% · Cr 45%`)
-- Herdr agent attention, transition notifications, and focus actions
-- Deterministic Git/build/CI trust evidence and local recovery capsules
-- Control Center–style menu panel with CPU/RAM/Disk/Network/Codex/Cursor cards and Fan Boost (real SMC fan control via `tilde-fan`, green spinning fan + `~` spray while on; admin password once per login via a background daemon)
-
-## Live updates
-
-Tilde publishes local snapshots through a shared `AsyncStream` with newest-value buffering. The main window and menu-bar panel subscribe to the same sampling pipeline, so opening both does not duplicate system or Codex work.
-
-Sampling adapts to visibility:
-
-| Metric | Tilde visible | Background |
+| Metric | Visible | Background |
 | --- | ---: | ---: |
-| CPU and network | 1 second | 5 seconds |
-| Memory and thermal state | 2 seconds | 10 seconds |
-| Battery | 15 seconds | 60 seconds |
-| Storage | 60 seconds | 5 minutes |
-| Codex usage | 60 seconds | 2 minutes |
-| Cursor usage | 2 minutes | 5 minutes |
-| Herdr agents | 2 seconds | 2 seconds |
+| CPU / network | 1s | 5s |
+| Memory / thermal | 2s | 10s |
+| Battery | 15s | 60s |
+| Storage | 60s | 5m |
+| Codex | 60s | 2m |
+| Cursor | 2m | 5m |
+| Herdr agents | 2s | 2s |
 
-Manual refresh forces all metrics. Live samples stay in memory and are not written to disk.
+</details>
 
-## Native interface
+## Privacy
 
-The full window and menu-bar panel use the same restrained native visual system:
+Tilde is **local-first**. It does **not** store:
 
-- Swift Charts backed by real bounded in-memory samples
-- Compact metric tiles and axis-free live graphs
-- Thin semantic capacity bars rather than oversized dashboard cards
-- Memory color driven primarily by macOS memory pressure, not merely occupied RAM
-- System materials, SF Symbols, native typography, and light/dark appearance support
-- Green, orange, and red reserved for healthy, elevated, and critical states
+- prompts or chat transcripts  
+- source code or diffs  
+- terminal output  
+- auth tokens or account email  
 
-No prompts, source code, terminal output, auth tokens, or account email are stored or printed.
+Recovery capsules keep only path, branch, attention counts, verification state, and a next-action hint under Application Support.
 
-## AI attention and verification
+## Repo layout
 
-When a local Herdr server is available, Tilde polls its structured agent inventory and maps
-each terminal to its actual Git repository and branch. The menu-bar panel shows agents that
-need input or have work ready to review before agents that are merely working. Selecting an
-agent focuses its Herdr terminal and activates the host terminal application.
+| Product | Role |
+| --- | --- |
+| `TildeDiagnostics` | Menu-bar app + diagnostics window |
+| `tilde-probe` | CLI feasibility report |
+| `tilde-fan` | Privileged fan daemon / CLI |
+| `TildeCore` | Shared monitoring, agents, trust, diary |
 
-Tilde posts transition-based notifications for new blockers and completed work. The first
-inventory is treated as a baseline, so launching Tilde does not replay stale alerts.
+## Docs
 
-For the active project, a deterministic trust packet summarizes changed-file and line counts,
-build and CI evidence, upstream drift, and elevated-risk configuration paths. It does not
-assign an opaque AI confidence score and does not persist source or diff content.
+- [AI Control Plane](Docs/AI-Control-Plane.md) — promise, shipped slice, next steps  
+- [Phase 0 Feasibility](Docs/Phase-0-Feasibility.md) — measured results and limits  
+- [Contribution workflow](AGENTS.md)
 
-A recovery capsule stores only project metadata under Application Support: repository path,
-branch, attention count, verification state, changed-file count, and the inferred next action.
-This provides a compact resume point after switching projects without retaining prompts or
-terminal transcripts.
+## Status
 
-See [Phase 0 Feasibility](Docs/Phase-0-Feasibility.md) for tested results and remaining limitations.
+Phase 0 diagnostics are solid. The AI attention / verification slice is in active dogfooding. Release gates: idle CPU, no notification spam on launch, low false blocked/done rates — details in the control-plane doc.
+
+---
+
+<p align="center">
+  <sub>Built for people who already live in the menu bar.</sub><br/>
+  <strong>~</strong>
+</p>
