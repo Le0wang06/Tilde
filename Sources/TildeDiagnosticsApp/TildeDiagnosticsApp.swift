@@ -201,6 +201,7 @@ final class DiagnosticViewModel: ObservableObject {
     private let fanBoostController = FanBoostController()
     private let buildPulseMonitor = BuildPulseMonitor()
     private let projectContextMonitor = ProjectContextMonitor()
+    private let gitWorktreeDiscovery = GitWorktreeDiscovery()
     private let slowdownNotifier = SlowdownNotifier()
     private let sessionDiary = SessionDiaryStore()
     private let herdrAgentProvider: HerdrAgentProvider
@@ -216,6 +217,9 @@ final class DiagnosticViewModel: ObservableObject {
     private var speedWriteTask: Task<Void, Never>?
     private var agentAttentionTask: Task<Void, Never>?
     private var verificationRunTask: Task<Void, Never>?
+    private var decisionEvidence: [DecisionQueueEvidence] = []
+    private var decisionDiscoveryNotes: [String] = []
+    private var lastFullDecisionRefreshAt: Date?
     private var didAskNotificationAuth = false
     private var didRecordAppStart = false
     private var lastLoggedBuildPhase: BuildPulsePhase = .idle
@@ -299,26 +303,8 @@ final class DiagnosticViewModel: ObservableObject {
                 guard let self else { break }
                 let preferredRoot = self.agentAttention.agents.first(where: { $0.focused })?.projectRoot
                     ?? self.agentAttention.agents.first(where: { $0.state == .working })?.projectRoot
-                let snapshot = await self.projectContextMonitor.snapshot(preferredRoot: preferredRoot)
                 if !self.freezeIdentityForReadmeCapture {
-                    self.projectContext = snapshot
-                    self.verification = await self.verificationService.snapshot(
-                        rootPath: snapshot.rootPath
-                    )
-                    self.trustPacket = await self.trustPacketProvider.snapshot(
-                        rootPath: snapshot.rootPath,
-                        build: self.buildPulse,
-                        ciStatus: snapshot.ciStatus,
-                        behind: snapshot.behind,
-                        verification: self.verification
-                    )
-                    self.recoveryCapsule = await self.recoveryCapsuleStore.update(
-                        project: snapshot,
-                        attention: self.agentAttention,
-                        trust: self.trustPacket,
-                        build: self.buildPulse
-                    )
-                    self.refreshDecisionQueue()
+                    await self.refreshProjectAndDecisionEvidence(preferredRoot: preferredRoot)
                 }
                 if let report = self.report {
                     self.publishMenuBarTitle(
@@ -374,13 +360,100 @@ final class DiagnosticViewModel: ObservableObject {
     }
 
     private func refreshDecisionQueue() {
-        decisionQueue = DecisionQueueComposer.compose(
-            project: projectContext,
-            trust: trustPacket,
-            verification: verification,
-            agents: agentAttention,
+        if decisionEvidence.isEmpty {
+            decisionQueue = DecisionQueueComposer.compose(
+                project: projectContext,
+                trust: trustPacket,
+                verification: verification,
+                agents: agentAttention,
+                build: buildPulse
+            )
+        } else {
+            decisionQueue = DecisionQueueComposer.compose(
+                changes: decisionEvidence,
+                agents: agentAttention,
+                discoveryNotes: decisionDiscoveryNotes
+            )
+        }
+    }
+
+    private func refreshProjectAndDecisionEvidence(preferredRoot: String?) async {
+        let activeProject = await projectContextMonitor.snapshot(preferredRoot: preferredRoot)
+        let activeVerification = await verificationService.snapshot(rootPath: activeProject.rootPath)
+        let activeTrust = await trustPacketProvider.snapshot(
+            rootPath: activeProject.rootPath,
+            build: buildPulse,
+            ciStatus: activeProject.ciStatus,
+            behind: activeProject.behind,
+            verification: activeVerification
+        )
+        projectContext = activeProject
+        verification = activeVerification
+        trustPacket = activeTrust
+        recoveryCapsule = await recoveryCapsuleStore.update(
+            project: activeProject,
+            attention: agentAttention,
+            trust: activeTrust,
             build: buildPulse
         )
+
+        let now = Date()
+        let needsFullRefresh = decisionEvidence.isEmpty
+            || lastFullDecisionRefreshAt.map { now.timeIntervalSince($0) >= 30 } != false
+        guard needsFullRefresh else {
+            upsertDecisionEvidence(.init(
+                project: activeProject,
+                trust: activeTrust,
+                verification: activeVerification
+            ))
+            refreshDecisionQueue()
+            return
+        }
+
+        let seedPaths = ([activeProject.rootPath].compactMap { $0 }
+            + agentAttention.agents.map { $0.projectRoot ?? $0.cwd })
+        let discovery = await gitWorktreeDiscovery.snapshot(seedPaths: seedPaths)
+        var refreshed: [DecisionQueueEvidence] = []
+        for worktree in discovery.worktrees where !worktree.isPrunable {
+            let context = await projectContextMonitor.snapshot(rootPath: worktree.path)
+            guard context.rootPath != nil else { continue }
+            let exactVerification = await verificationService.snapshot(rootPath: worktree.path)
+            let exactTrust = await trustPacketProvider.snapshot(
+                rootPath: worktree.path,
+                build: BuildPulseSnapshot(),
+                ciStatus: context.ciStatus,
+                behind: context.behind,
+                verification: exactVerification
+            )
+            refreshed.append(.init(
+                project: context,
+                trust: exactTrust,
+                verification: exactVerification
+            ))
+        }
+        if refreshed.isEmpty, activeProject.rootPath != nil {
+            refreshed = [.init(
+                project: activeProject,
+                trust: activeTrust,
+                verification: activeVerification
+            )]
+        }
+        decisionEvidence = refreshed
+        decisionDiscoveryNotes = discovery.notes
+        lastFullDecisionRefreshAt = now
+        refreshDecisionQueue()
+    }
+
+    private func upsertDecisionEvidence(_ evidence: DecisionQueueEvidence) {
+        guard let root = evidence.project.rootPath else { return }
+        let key = canonicalizePath(root)
+        if let index = decisionEvidence.firstIndex(where: {
+            $0.project.rootPath.map(canonicalizePath) == key
+        }) {
+            decisionEvidence[index] = evidence
+        } else {
+            decisionEvidence.append(evidence)
+        }
     }
 
     /// Replace personal project/agent paths with anonymous demo labels for README captures.
@@ -542,6 +615,37 @@ final class DiagnosticViewModel: ObservableObject {
             ),
             receipts: demoReceipts
         )
+        decisionEvidence = [
+            DecisionQueueEvidence(
+                project: projectContext,
+                trust: trustPacket,
+                verification: verification
+            ),
+            DecisionQueueEvidence(
+                project: ProjectContextSnapshot(
+                    projectName: "storefront",
+                    rootPath: "/Users/you/Projects/storefront",
+                    branch: "feature/hud",
+                    ciStatus: .failure,
+                    ciSummary: "CI · fail",
+                    pullRequestURL: "https://example.test/storefront/pull/42"
+                ),
+                trust: TrustPacketSnapshot(
+                    state: .needsVerification,
+                    projectRoot: "/Users/you/Projects/storefront",
+                    changedFiles: 3,
+                    additions: 61,
+                    deletions: 8,
+                    comparisonBase: "main",
+                    risks: [TrustRisk(kind: .ciFailed, message: "CI failed for this commit")]
+                ),
+                verification: VerificationSnapshot(
+                    state: .failed,
+                    projectRoot: "/Users/you/Projects/storefront"
+                )
+            ),
+        ]
+        decisionDiscoveryNotes = []
 
         recoveryCapsule = RecoveryCapsule(
             projectRoot: "/Users/you/Projects/checkout-api",
@@ -685,31 +789,65 @@ final class DiagnosticViewModel: ObservableObject {
     }
 
     func runVerification(trustingProfile: Bool = false) {
-        guard verificationRunTask == nil,
-              let root = projectContext.rootPath,
-              let expectedProfileHash = verification.loadedProfile?.profileHash else { return }
-        verification.state = .running
-        verification.activeCheckName = nil
-        verification.message = nil
+        guard let root = projectContext.rootPath else { return }
+        startVerification(rootPath: root, trustingProfile: trustingProfile)
+    }
+
+    private func startVerification(rootPath: String, trustingProfile: Bool) {
+        guard verificationRunTask == nil else { return }
         verificationRunTask = Task { [weak self] in
             guard let self else { return }
+            var pending = await verificationService.snapshot(rootPath: rootPath)
+            guard let expectedProfileHash = pending.loadedProfile?.profileHash else {
+                verificationRunTask = nil
+                return
+            }
+            pending.state = .running
+            pending.activeCheckName = nil
+            pending.message = nil
+            await updateDecisionEvidence(rootPath: rootPath, verification: pending)
             let result: VerificationSnapshot
             do {
                 result = try await verificationService.run(
-                    rootPath: root,
+                    rootPath: rootPath,
                     trustingProfile: trustingProfile,
                     expectedProfileHash: expectedProfileHash
                 )
             } catch {
-                var retryable = await verificationService.snapshot(rootPath: root)
+                var retryable = await verificationService.snapshot(rootPath: rootPath)
                 retryable.message = error.localizedDescription
                 result = retryable
             }
             guard !Task.isCancelled else { return }
-            verification = result
+            await updateDecisionEvidence(rootPath: rootPath, verification: result)
             verificationRunTask = nil
-            refreshDecisionQueue()
         }
+    }
+
+    private func updateDecisionEvidence(
+        rootPath: String,
+        verification exactVerification: VerificationSnapshot
+    ) async {
+        let context = await projectContextMonitor.snapshot(rootPath: rootPath)
+        let exactTrust = await trustPacketProvider.snapshot(
+            rootPath: rootPath,
+            build: canonicalizePath(projectContext.rootPath ?? "") == canonicalizePath(rootPath)
+                ? buildPulse : BuildPulseSnapshot(),
+            ciStatus: context.ciStatus,
+            behind: context.behind,
+            verification: exactVerification
+        )
+        upsertDecisionEvidence(.init(
+            project: context,
+            trust: exactTrust,
+            verification: exactVerification
+        ))
+        if canonicalizePath(projectContext.rootPath ?? "") == canonicalizePath(rootPath) {
+            projectContext = context
+            verification = exactVerification
+            trustPacket = exactTrust
+        }
+        refreshDecisionQueue()
     }
 
     func cancelVerification() {
@@ -732,9 +870,8 @@ final class DiagnosticViewModel: ObservableObject {
                 result = retryable
             }
             guard !Task.isCancelled else { return }
-            verification = result
+            await updateDecisionEvidence(rootPath: root, verification: result)
             verificationRunTask = nil
-            refreshDecisionQueue()
         }
     }
 
@@ -818,6 +955,7 @@ final class DiagnosticViewModel: ObservableObject {
     func refresh() {
         startIfNeeded()
         runState.apply(.start)
+        lastFullDecisionRefreshAt = nil
         Task {
             await liveMonitoring.refreshNow()
         }
@@ -879,9 +1017,9 @@ final class DiagnosticViewModel: ObservableObject {
         case .reviewChange:
             reviewChange(at: item.worktreePath)
         case .runChecks:
-            runVerification()
+            startVerification(rootPath: item.worktreePath, trustingProfile: false)
         case .trustProfile:
-            runVerification(trustingProfile: true)
+            startVerification(rootPath: item.worktreePath, trustingProfile: true)
         case .openAgent:
             if let terminalID = item.agentTerminalIDs.first,
                let agent = agentAttention.agents.first(where: { $0.terminalID == terminalID }) {
@@ -891,6 +1029,9 @@ final class DiagnosticViewModel: ObservableObject {
             }) {
                 focusAgent(agent)
             }
+        case .openPullRequest:
+            guard let rawURL = item.pullRequestURL, let url = URL(string: rawURL) else { return }
+            NSWorkspace.shared.open(url)
         }
     }
 
@@ -1371,35 +1512,44 @@ struct MenuBarPanel: View {
 
     @ViewBuilder
     private func metricGrid(_ report: DiagnosticReport) -> some View {
-        let topDecision = model.decisionQueue.topItem
-        let focusingDecision = topDecision?.needsYou == true
+        let decisions = model.decisionQueue.needsYouItems
 
         VStack(spacing: 8) {
-            decisionSection(topDecision)
+            if decisions.isEmpty {
+                decisionSection(model.decisionQueue.topItem)
 
-            if !focusingDecision,
-               model.agentAttention.providerAvailable,
-               !model.agentAttention.agents.isEmpty {
-                attentionCard
-            }
-            if !focusingDecision, model.verification.state != .dismissed {
-                verificationCard
-            }
-
-            HStack(alignment: .top, spacing: 8) {
-                cpuCard(report)
-                memoryCard(report)
-            }
-            HStack(alignment: .top, spacing: 8) {
-                fanCard
-                VStack(spacing: 8) {
-                    storageCard(report)
-                    networkCard(report.system.network)
+                if model.agentAttention.providerAvailable,
+                   !model.agentAttention.agents.isEmpty {
+                    attentionCard
                 }
+                if model.verification.state != .dismissed {
+                    verificationCard
+                }
+
+                HStack(alignment: .top, spacing: 8) {
+                    cpuCard(report)
+                    memoryCard(report)
+                }
+                HStack(alignment: .top, spacing: 8) {
+                    fanCard
+                    VStack(spacing: 8) {
+                        storageCard(report)
+                        networkCard(report.system.network)
+                    }
+                }
+                agentCard(report)
+                contextStrip
+                focusStrip
+            } else {
+                ForEach(Array(decisions.enumerated()), id: \.element.id) { index, item in
+                    if index == 0 {
+                        decisionCard(item)
+                    } else {
+                        compactDecisionCard(item)
+                    }
+                }
+                decisionActivityStrip
             }
-            agentCard(report)
-            contextStrip
-            focusStrip
         }
     }
 
@@ -1499,6 +1649,51 @@ struct MenuBarPanel: View {
                 }
             }
         }
+    }
+
+    private func compactDecisionCard(_ item: DecisionQueueItem) -> some View {
+        let tint = decisionTint(item)
+        return ControlCenterCard {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(tint)
+                    .frame(width: 7, height: 7)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.projectName)
+                        .font(.caption.weight(.semibold))
+                        .lineLimit(1)
+                    Text(item.reasons.first?.message ?? item.subtitle)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 4)
+                if let primary = item.primaryAction {
+                    Button(primary.title) {
+                        model.performDecisionAction(primary, for: item)
+                    }
+                    .font(.caption2.weight(.semibold))
+                    .buttonStyle(.plain)
+                    .foregroundStyle(tint)
+                }
+            }
+        }
+    }
+
+    private var decisionActivityStrip: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "ellipsis.circle")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text("\(model.decisionQueue.workingCount) working · \(model.decisionQueue.idleCount) idle")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+            Text("\(model.decisionQueue.items.count) changes")
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 4)
     }
 
     private func decisionIdleStrip(_ item: DecisionQueueItem) -> some View {

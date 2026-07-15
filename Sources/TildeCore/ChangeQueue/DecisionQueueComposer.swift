@@ -11,16 +11,29 @@ public enum DecisionQueueComposer {
     ) -> DecisionQueueSnapshot {
         _ = build
 
+        return compose(
+            changes: [DecisionQueueEvidence(project: project, trust: trust, verification: verification)],
+            agents: agents
+        )
+    }
+
+    public static func compose(
+        changes: [DecisionQueueEvidence],
+        agents: AgentAttentionSnapshot,
+        discoveryNotes: [String] = []
+    ) -> DecisionQueueSnapshot {
         var buckets: [String: Bucket] = [:]
 
-        if let root = project.rootPath, !root.isEmpty {
+        for change in changes {
+            guard let root = change.project.rootPath, !root.isEmpty else { continue }
             let key = canonicalize(root)
             buckets[key] = Bucket(
                 worktreePath: root,
-                projectName: project.projectName ?? URL(fileURLWithPath: root).lastPathComponent,
-                branch: project.branch,
-                trust: trust,
-                verification: verification,
+                projectName: change.project.projectName ?? URL(fileURLWithPath: root).lastPathComponent,
+                branch: change.project.branch,
+                pullRequestURL: change.project.pullRequestURL,
+                trust: change.trust,
+                verification: change.verification,
                 agents: []
             )
         }
@@ -32,6 +45,7 @@ public enum DecisionQueueComposer {
                 worktreePath: root,
                 projectName: agent.projectName,
                 branch: agent.branch,
+                pullRequestURL: nil,
                 trust: .unavailable,
                 verification: .unavailable,
                 agents: []
@@ -39,13 +53,6 @@ public enum DecisionQueueComposer {
             if bucket.branch == nil { bucket.branch = agent.branch }
             if bucket.projectName.isEmpty { bucket.projectName = agent.projectName }
             bucket.agents.append(agent)
-            // Prefer exact trust/verification when this agent is on the active project.
-            if let projectRoot = project.rootPath, canonicalize(projectRoot) == key {
-                bucket.trust = trust
-                bucket.verification = verification
-                if let name = project.projectName { bucket.projectName = name }
-                if let branch = project.branch { bucket.branch = branch }
-            }
             buckets[key] = bucket
         }
 
@@ -58,13 +65,14 @@ public enum DecisionQueueComposer {
                 return lhs.worktreePath < rhs.worktreePath
             }
 
-        let workingCount = agents.agents.filter { $0.state == .working }.count
-        let idleCount = agents.agents.filter { $0.state == .idle || $0.state == .unknown }.count
+        let workingCount = items.filter { $0.priority == 6 }.count
+        let idleCount = items.filter { $0.priority == 8 }.count
         return DecisionQueueSnapshot(
             items: items,
             workingCount: workingCount,
             idleCount: idleCount,
-            sampledAt: Date()
+            sampledAt: Date(),
+            discoveryNotes: discoveryNotes
         )
     }
 
@@ -72,6 +80,7 @@ public enum DecisionQueueComposer {
         var worktreePath: String
         var projectName: String
         var branch: String?
+        var pullRequestURL: String?
         var trust: TrustPacketSnapshot
         var verification: VerificationSnapshot
         var agents: [AgentAttentionItem]
@@ -92,9 +101,10 @@ public enum DecisionQueueComposer {
             projectName: bucket.projectName,
             branch: bucket.branch,
             worktreePath: bucket.worktreePath,
+            pullRequestURL: bucket.pullRequestURL,
             reasons: reasons,
             actions: actions,
-            agentTerminalIDs: bucket.agents.map(\.terminalID),
+            agentTerminalIDs: Array(Set(bucket.agents.map(\.terminalID))).sorted(),
             priority: priority,
             needsYou: needsYou,
             primaryActionKind: primary
@@ -156,7 +166,19 @@ public enum DecisionQueueComposer {
                 severity: .info,
                 message: "Checks are running…"
             ))
-        case .unavailable, .unconfigured, .dismissed, .partial:
+        case .unconfigured:
+            reasons.append(.init(
+                kind: .verificationMissing,
+                severity: .warn,
+                message: "No verification profile is configured"
+            ))
+        case .partial:
+            reasons.append(.init(
+                kind: .verificationMissing,
+                severity: .warn,
+                message: "Some required check evidence is missing"
+            ))
+        case .unavailable, .dismissed:
             break
         }
 
@@ -230,13 +252,19 @@ public enum DecisionQueueComposer {
         if reasons.contains(where: { $0.kind == .agentBlocked }) { return 0 }
         if reasons.contains(where: { $0.kind == .verificationFailed }) { return 1 }
         if reasons.contains(where: { $0.kind == .verificationStale }) { return 2 }
+        if bucket.agents.contains(where: { $0.state == .working })
+            || reasons.contains(where: { $0.kind == .verificationRunning }) {
+            return 6
+        }
         if reasons.contains(where: { $0.kind == .verificationMissing || $0.kind == .verificationUntrusted }) {
             return 3
         }
         if reasons.contains(where: { $0.kind == .agentReady }) { return 4 }
-        if reasons.contains(where: { $0.kind == .ciFailed || $0.kind == .sensitiveFiles }) { return 5 }
-        if reasons.contains(where: { $0.kind == .working || $0.kind == .verificationRunning }) { return 6 }
-        if reasons.contains(where: { $0.kind == .verificationPassed }) { return 7 }
+        if reasons.contains(where: {
+            $0.kind == .ciFailed || $0.kind == .sensitiveFiles || $0.kind == .verificationPassed
+                || $0.kind == .dirtyChange
+        }) { return 5 }
+        if reasons.contains(where: { $0.kind == .working }) { return 6 }
         return 8
     }
 
@@ -273,6 +301,9 @@ public enum DecisionQueueComposer {
         if !bucket.agents.isEmpty {
             actions.append(.init(kind: .openAgent, title: "Open Agent"))
         }
+        if bucket.pullRequestURL != nil {
+            actions.append(.init(kind: .openPullRequest, title: "Open PR"))
+        }
 
         return actions
     }
@@ -282,13 +313,13 @@ public enum DecisionQueueComposer {
         let preferred: [DecisionActionKind]
         switch priority {
         case 0:
-            preferred = [.openAgent, .reviewChange, .runChecks, .trustProfile]
+            preferred = [.openAgent, .reviewChange, .runChecks, .trustProfile, .openPullRequest]
         case 1, 2, 3:
-            preferred = [.runChecks, .trustProfile, .reviewChange, .openAgent]
+            preferred = [.runChecks, .trustProfile, .reviewChange, .openAgent, .openPullRequest]
         case 4, 5, 7:
-            preferred = [.reviewChange, .openAgent, .runChecks, .trustProfile]
+            preferred = [.reviewChange, .openPullRequest, .openAgent, .runChecks, .trustProfile]
         default:
-            preferred = [.reviewChange, .openAgent, .runChecks, .trustProfile]
+            preferred = [.reviewChange, .openPullRequest, .openAgent, .runChecks, .trustProfile]
         }
         return preferred.first(where: { enabled.contains($0) })
     }
