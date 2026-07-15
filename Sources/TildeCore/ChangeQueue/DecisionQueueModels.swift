@@ -143,7 +143,7 @@ public struct DecisionQueueSnapshot: Sendable, Equatable {
     public static let empty = DecisionQueueSnapshot()
 
     public var needsYouItems: [DecisionQueueItem] {
-        Array(items.filter(\.needsYou).prefix(3))
+        items.filter(\.needsYou)
     }
 
     public var topItem: DecisionQueueItem? { items.first }
