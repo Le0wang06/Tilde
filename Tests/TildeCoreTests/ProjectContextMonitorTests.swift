@@ -22,3 +22,26 @@ import Testing
     #expect(result.status == .unknown)
     #expect(result.summary == "No CI for current commit")
 }
+
+@Test func pullRequestParserAcceptsOnlyTheCurrentCommit() {
+    let data = Data("""
+    [
+      {"headRefOid":"old","url":"https://example.test/old"},
+      {"headRefOid":"current","url":"https://example.test/current"}
+    ]
+    """.utf8)
+
+    #expect(ProjectContextMonitor.parsePullRequestURL(data, matchingHead: "current") == "https://example.test/current")
+    #expect(ProjectContextMonitor.parsePullRequestURL(data, matchingHead: "missing") == nil)
+}
+
+@Test func exactWorktreeLookupNeverFallsBackToAnotherActiveRepository() async throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("tilde-not-a-repo-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+    let snapshot = await ProjectContextMonitor().snapshot(rootPath: directory.path)
+
+    #expect(snapshot == .empty)
+}

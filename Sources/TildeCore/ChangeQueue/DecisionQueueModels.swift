@@ -44,6 +44,7 @@ public enum DecisionActionKind: String, Sendable, Equatable {
     case reviewChange
     case runChecks
     case openAgent
+    case openPullRequest
     case trustProfile
 }
 
@@ -68,6 +69,7 @@ public struct DecisionQueueItem: Identifiable, Sendable, Equatable {
     public let projectName: String
     public let branch: String?
     public let worktreePath: String
+    public let pullRequestURL: String?
     public let reasons: [DecisionReason]
     public let actions: [DecisionAction]
     public let agentTerminalIDs: [String]
@@ -82,6 +84,7 @@ public struct DecisionQueueItem: Identifiable, Sendable, Equatable {
         projectName: String,
         branch: String?,
         worktreePath: String,
+        pullRequestURL: String? = nil,
         reasons: [DecisionReason],
         actions: [DecisionAction],
         agentTerminalIDs: [String],
@@ -95,6 +98,7 @@ public struct DecisionQueueItem: Identifiable, Sendable, Equatable {
         self.projectName = projectName
         self.branch = branch
         self.worktreePath = worktreePath
+        self.pullRequestURL = pullRequestURL
         self.reasons = reasons
         self.actions = actions
         self.agentTerminalIDs = agentTerminalIDs
@@ -120,17 +124,20 @@ public struct DecisionQueueSnapshot: Sendable, Equatable {
     public var workingCount: Int
     public var idleCount: Int
     public var sampledAt: Date
+    public var discoveryNotes: [String]
 
     public init(
         items: [DecisionQueueItem] = [],
         workingCount: Int = 0,
         idleCount: Int = 0,
-        sampledAt: Date = Date()
+        sampledAt: Date = Date(),
+        discoveryNotes: [String] = []
     ) {
         self.items = items
         self.workingCount = workingCount
         self.idleCount = idleCount
         self.sampledAt = sampledAt
+        self.discoveryNotes = discoveryNotes
     }
 
     public static let empty = DecisionQueueSnapshot()
@@ -140,4 +147,21 @@ public struct DecisionQueueSnapshot: Sendable, Equatable {
     }
 
     public var topItem: DecisionQueueItem? { items.first }
+}
+
+/// Exact evidence collected for one Git worktree before it is reduced into a decision card.
+public struct DecisionQueueEvidence: Sendable, Equatable {
+    public let project: ProjectContextSnapshot
+    public let trust: TrustPacketSnapshot
+    public let verification: VerificationSnapshot
+
+    public init(
+        project: ProjectContextSnapshot,
+        trust: TrustPacketSnapshot,
+        verification: VerificationSnapshot
+    ) {
+        self.project = project
+        self.trust = trust
+        self.verification = verification
+    }
 }
