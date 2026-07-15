@@ -1517,29 +1517,6 @@ struct MenuBarPanel: View {
         VStack(spacing: 8) {
             if decisions.isEmpty {
                 decisionSection(model.decisionQueue.topItem)
-
-                if model.agentAttention.providerAvailable,
-                   !model.agentAttention.agents.isEmpty {
-                    attentionCard
-                }
-                if model.verification.state != .dismissed {
-                    verificationCard
-                }
-
-                HStack(alignment: .top, spacing: 8) {
-                    cpuCard(report)
-                    memoryCard(report)
-                }
-                HStack(alignment: .top, spacing: 8) {
-                    fanCard
-                    VStack(spacing: 8) {
-                        storageCard(report)
-                        networkCard(report.system.network)
-                    }
-                }
-                agentCard(report)
-                contextStrip
-                focusStrip
             } else {
                 ForEach(Array(decisions.enumerated()), id: \.element.id) { index, item in
                     if index == 0 {
@@ -1550,6 +1527,29 @@ struct MenuBarPanel: View {
                 }
                 decisionActivityStrip
             }
+
+            if model.agentAttention.providerAvailable,
+               !model.agentAttention.agents.isEmpty {
+                attentionCard
+            }
+            if model.verification.state != .dismissed {
+                verificationCard
+            }
+
+            HStack(alignment: .top, spacing: 8) {
+                cpuCard(report)
+                memoryCard(report)
+            }
+            HStack(alignment: .top, spacing: 8) {
+                fanCard
+                VStack(spacing: 8) {
+                    storageCard(report)
+                    networkCard(report.system.network)
+                }
+            }
+            agentCard(report)
+            contextStrip
+            focusStrip
         }
     }
 
