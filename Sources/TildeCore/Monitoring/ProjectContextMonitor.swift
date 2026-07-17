@@ -22,30 +22,36 @@ public struct ProjectContextSnapshot: Sendable, Equatable {
     public var projectName: String?
     public var rootPath: String?
     public var branch: String?
+    public var headOID: String?
     public var isDirty: Bool
     public var ahead: Int?
     public var behind: Int?
     public var ciStatus: ProjectCIStatus
     public var ciSummary: String?
+    public var pullRequestURL: String?
 
     public init(
         projectName: String? = nil,
         rootPath: String? = nil,
         branch: String? = nil,
+        headOID: String? = nil,
         isDirty: Bool = false,
         ahead: Int? = nil,
         behind: Int? = nil,
         ciStatus: ProjectCIStatus = .unknown,
-        ciSummary: String? = nil
+        ciSummary: String? = nil,
+        pullRequestURL: String? = nil
     ) {
         self.projectName = projectName
         self.rootPath = rootPath
         self.branch = branch
+        self.headOID = headOID
         self.isDirty = isDirty
         self.ahead = ahead
         self.behind = behind
         self.ciStatus = ciStatus
         self.ciSummary = ciSummary
+        self.pullRequestURL = pullRequestURL
     }
 
     public static let empty = ProjectContextSnapshot()
@@ -75,8 +81,15 @@ public struct ProjectContextSnapshot: Sendable, Equatable {
 
 /// Resolves the active developer project and reads git / optional CI status.
 public actor ProjectContextMonitor {
-    private var lastCIFetchAt: Date?
-    private var cachedCI: (root: String, status: ProjectCIStatus, summary: String?)?
+    private struct RemoteCache {
+        let headOID: String?
+        let fetchedAt: Date
+        let status: ProjectCIStatus
+        let summary: String?
+        let pullRequestURL: String?
+    }
+
+    private var remoteCache: [String: RemoteCache] = [:]
 
     public init() {}
 
@@ -86,8 +99,21 @@ public actor ProjectContextMonitor {
             return .empty
         }
 
+        return await snapshotForGitRoot(root)
+    }
+
+    /// Resolve exactly this worktree, never falling back to whichever editor happens to be active.
+    public func snapshot(rootPath: String) async -> ProjectContextSnapshot {
+        guard let root = Self.gitRoot(for: rootPath) else { return .empty }
+        return await snapshotForGitRoot(root)
+    }
+
+    private func snapshotForGitRoot(_ root: String) async -> ProjectContextSnapshot {
         let name = URL(fileURLWithPath: root).lastPathComponent
         let branch = Self.runGit(["rev-parse", "--abbrev-ref", "HEAD"], in: root)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedBranch = (branch?.isEmpty == false && branch != "HEAD") ? branch : nil
+        let headOID = Self.runGit(["rev-parse", "HEAD"], in: root)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let porcelain = Self.runGit(["status", "--porcelain"], in: root) ?? ""
         let isDirty = !porcelain.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -105,29 +131,41 @@ public actor ProjectContextMonitor {
             }
         }
 
-        let ci = await refreshCIIfNeeded(root: root)
+        let remote = await refreshRemoteIfNeeded(root: root, headOID: headOID, branch: normalizedBranch)
         return ProjectContextSnapshot(
             projectName: name,
             rootPath: root,
-            branch: (branch?.isEmpty == false) ? branch : nil,
+            branch: normalizedBranch,
+            headOID: (headOID?.isEmpty == false) ? headOID : nil,
             isDirty: isDirty,
             ahead: ahead,
             behind: behind,
-            ciStatus: ci.status,
-            ciSummary: ci.summary
+            ciStatus: remote.status,
+            ciSummary: remote.summary,
+            pullRequestURL: remote.pullRequestURL
         )
     }
 
-    private func refreshCIIfNeeded(root: String) async -> (status: ProjectCIStatus, summary: String?) {
-        if let cached = cachedCI, cached.root == root,
-           let last = lastCIFetchAt, Date().timeIntervalSince(last) < 45 {
-            return (cached.status, cached.summary)
+    private func refreshRemoteIfNeeded(
+        root: String,
+        headOID: String?,
+        branch: String?
+    ) async -> (status: ProjectCIStatus, summary: String?, pullRequestURL: String?) {
+        if let cached = remoteCache[root], cached.headOID == headOID,
+           Date().timeIntervalSince(cached.fetchedAt) < 45 {
+            return (cached.status, cached.summary, cached.pullRequestURL)
         }
 
-        let result = await Self.fetchCIStatus(in: root)
-        lastCIFetchAt = Date()
-        cachedCI = (root, result.status, result.summary)
-        return result
+        let ci = await Self.fetchCIStatus(in: root, headOID: headOID)
+        let pullRequestURL = await Self.fetchPullRequestURL(in: root, branch: branch, headOID: headOID)
+        remoteCache[root] = RemoteCache(
+            headOID: headOID,
+            fetchedAt: Date(),
+            status: ci.status,
+            summary: ci.summary,
+            pullRequestURL: pullRequestURL
+        )
+        return (ci.status, ci.summary, pullRequestURL)
     }
 
     private static func resolveProjectRoot() -> String? {
@@ -269,7 +307,11 @@ public actor ProjectContextMonitor {
         return String(data: data, encoding: .utf8)
     }
 
-    private static func fetchCIStatus(in root: String) async -> (status: ProjectCIStatus, summary: String?) {
+    private static func fetchCIStatus(
+        in root: String,
+        headOID: String?
+    ) async -> (status: ProjectCIStatus, summary: String?) {
+        guard let headOID, !headOID.isEmpty else { return (.unknown, "No current commit") }
         let ghCandidates = ["/opt/homebrew/bin/gh", "/usr/local/bin/gh"]
         guard let gh = ghCandidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
             return (.unknown, nil)
@@ -279,8 +321,9 @@ public actor ProjectContextMonitor {
         proc.executableURL = URL(fileURLWithPath: gh)
         proc.arguments = [
             "run", "list",
+            "--commit", headOID,
             "--limit", "1",
-            "--json", "conclusion,status,name,displayTitle,headBranch",
+            "--json", "conclusion,status,name,displayTitle,headBranch,headSha,url",
         ]
         proc.currentDirectoryURL = URL(fileURLWithPath: root)
         let out = Pipe()
@@ -295,9 +338,55 @@ public actor ProjectContextMonitor {
             return (.unknown, nil)
         }
         guard proc.terminationStatus == 0 else { return (.unknown, nil) }
+        return parseCIStatus(data, matchingHead: headOID)
+    }
+
+    private static func fetchPullRequestURL(
+        in root: String,
+        branch: String?,
+        headOID: String?
+    ) async -> String? {
+        guard let branch, branch != "HEAD", !branch.isEmpty,
+              let headOID, !headOID.isEmpty else { return nil }
+        let ghCandidates = ["/opt/homebrew/bin/gh", "/usr/local/bin/gh"]
+        guard let gh = ghCandidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
+            return nil
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: gh)
+        process.arguments = [
+            "pr", "list",
+            "--state", "open",
+            "--head", branch,
+            "--limit", "10",
+            "--json", "headRefOid,url",
+        ]
+        process.currentDirectoryURL = URL(fileURLWithPath: root)
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = Pipe()
+        do {
+            try process.run()
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { return nil }
+            return parsePullRequestURL(data, matchingHead: headOID)
+        } catch {
+            return nil
+        }
+    }
+
+    static func parseCIStatus(
+        _ data: Data,
+        matchingHead headOID: String
+    ) -> (status: ProjectCIStatus, summary: String?) {
         guard let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
               let first = rows.first else {
-            return (.unknown, "No recent CI")
+            return (.unknown, "No CI for current commit")
+        }
+        guard (first["headSha"] as? String) == headOID else {
+            return (.unknown, "No CI for current commit")
         }
 
         let statusRaw = (first["status"] as? String)?.lowercased() ?? ""
@@ -313,5 +402,12 @@ public actor ProjectContextMonitor {
         case "cancelled": return (.cancelled, title)
         default: return (.unknown, title)
         }
+    }
+
+    static func parsePullRequestURL(_ data: Data, matchingHead headOID: String) -> String? {
+        guard let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return nil
+        }
+        return rows.first(where: { ($0["headRefOid"] as? String) == headOID })?["url"] as? String
     }
 }

@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// AppKit status item so the AI remaining % is always visible as text
+/// AppKit status item so today's AI spend is always visible as text
 /// in the macOS menu bar (SwiftUI MenuBarExtra often hides titles).
 @MainActor
 final class MenuBarStatusItemController: NSObject {
@@ -18,13 +18,13 @@ final class MenuBarStatusItemController: NSObject {
         if statusItem == nil {
             let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
             item.button?.font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
-            item.button?.toolTip = "Tilde — remaining allowance and tokens used today"
+            item.button?.toolTip = "Tilde — daily AI cost"
             item.button?.target = self
             item.button?.action = #selector(togglePopover(_:))
             statusItem = item
         }
 
-        statusItem?.button?.title = model.menuBarTitle
+        updateTitle(model.menuBarTitle, needsAttention: model.agentAttention.attentionCount > 0)
 
         if popover == nil {
             let popover = NSPopover()
@@ -59,16 +59,27 @@ final class MenuBarStatusItemController: NSObject {
                 object: nil,
                 queue: .main
             ) { [weak self] notification in
-                let title = notification.userInfo?["title"] as? String ?? "~ …"
+                let title = notification.userInfo?["title"] as? String ?? "$—"
+                let needsAttention = notification.userInfo?["needsAttention"] as? Bool ?? false
                 Task { @MainActor in
-                    self?.statusItem?.button?.title = title
+                    self?.updateTitle(title, needsAttention: needsAttention)
                 }
             }
         }
     }
 
-    func updateTitle(_ title: String) {
+    func updateTitle(_ title: String, needsAttention: Bool = false) {
         statusItem?.button?.title = title
+        statusItem?.button?.toolTip = needsAttention
+            ? "Tilde — agent needs your attention"
+            : "Tilde — daily AI cost"
+        // Subtle emphasis when something needs you; keep spend readable.
+        statusItem?.button?.appearsDisabled = false
+        if needsAttention {
+            statusItem?.button?.contentTintColor = .systemOrange
+        } else {
+            statusItem?.button?.contentTintColor = nil
+        }
     }
 
     func showPopover() {

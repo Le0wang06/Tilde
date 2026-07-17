@@ -28,18 +28,30 @@ struct TildeProbe {
         }
 
         let currentRoot = Self.gitRoot(at: FileManager.default.currentDirectoryPath)
+        let verification = await VerificationService().snapshot(rootPath: currentRoot)
         let trust = await TrustPacketProvider().snapshot(
             rootPath: currentRoot,
             build: BuildPulseSnapshot(),
             ciStatus: .unknown,
-            behind: nil
+            behind: nil,
+            verification: verification
         )
         print("Trust Packet          \(trust.state.label) (\(trust.summary))")
+        print("Exact Verification    \(verification.state.label) (\(verification.summary))")
 
         if case .available(let codex) = report.codex {
             print("Codex Authentication  \(codex.isAuthenticated ? "Working" : "Required")")
-            print("Codex Usage           \(codex.primaryLimit == nil ? "Unavailable" : "Working")")
-            print("Codex Tokens Today    \(codex.tokensToday == nil ? "Unavailable" : "Working")")
+            print("Codex Usage           \(codex.rateLimitWindows.isEmpty ? "Unavailable" : "Working")")
+            for window in codex.rateLimitWindows {
+                print("Codex \(window.kind.compactLabel) Window   \(window.remainingPercent)% left")
+            }
+            print("Codex Tokens Today    \(codex.tokensToday.map(String.init) ?? "Unavailable")")
+            if let spend = codex.dailySpend {
+                print("Codex Cost Today      \(DailyAISpendSummary.usd(spend.cents)) \(spend.basis == .estimatedFromTokenBreakdown ? "estimated" : "reported")")
+            }
+            if let estimateNote = codex.notes.first(where: { $0.hasPrefix("Codex daily cost is an estimate") }) {
+                print("Codex Cost Basis      \(estimateNote)")
+            }
             print("Codex Threads         \(codex.threadCount == nil ? "Unavailable" : "Working")")
             for note in codex.notes {
                 print("Codex Note            \(note)")

@@ -166,13 +166,19 @@ public actor AgentAttentionMonitor {
         var events: [AgentAttentionEvent] = []
         if hasBaseline {
             for agent in snapshot.agents {
-                guard previousStates[agent.id] != agent.state else { continue }
+                let previous = previousStates[agent.id]
+                guard previous != agent.state else { continue }
                 switch agent.state {
                 case .blocked:
                     events.append(AgentAttentionEvent(kind: .needsInput, agent: agent))
                 case .done:
                     events.append(AgentAttentionEvent(kind: .completed, agent: agent))
-                case .working, .idle, .unknown:
+                case .idle:
+                    // Herdr reports finished turns as idle (not done) for quick Q&A.
+                    if previous == .working {
+                        events.append(AgentAttentionEvent(kind: .completed, agent: agent))
+                    }
+                case .working, .unknown:
                     break
                 }
             }

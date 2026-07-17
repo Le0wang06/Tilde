@@ -11,13 +11,19 @@ APP_SRC="$ROOT/.build/Tilde.app"
 APP_DST="$HOME/Applications/Tilde.app"
 
 rm -rf "$APP_SRC"
-mkdir -p "$APP_SRC/Contents/MacOS"
+mkdir -p "$APP_SRC/Contents/MacOS" "$APP_SRC/Contents/Resources"
 cp "$BIN" "$APP_SRC/Contents/MacOS/TildeDiagnostics"
 cp "$ROOT/Sources/TildeDiagnosticsApp/Info.plist" "$APP_SRC/Contents/Info.plist"
+cp "$ROOT/Sources/TildeDiagnosticsApp/Resources/AppIcon.icns" "$APP_SRC/Contents/Resources/AppIcon.icns"
+cp "$ROOT/Sources/TildeDiagnosticsApp/Resources/tilde-logo.png" "$APP_SRC/Contents/Resources/tilde-logo.png"
 
 mkdir -p "$HOME/Applications"
 rm -rf "$APP_DST"
 cp -R "$APP_SRC" "$APP_DST"
+codesign --force --deep --sign - "$APP_DST" >/dev/null 2>&1 || true
+
+# Refresh Finder/Launch Services icon cache for this bundle.
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP_DST" >/dev/null 2>&1 || true
 
 LABEL="local.tilde.diagnostics"
 PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
