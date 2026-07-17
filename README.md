@@ -71,7 +71,21 @@ Editors edit. Herdr runs agents. **Tilde is the ambient layer between them.**
 
 ## Install
 
-**macOS 14+ · Swift 6.1+**
+| Area | In the menu bar / panel |
+| --- | --- |
+| **System HUD** | CPU sparkline, RAM pressure, disk, network, thermal slowdown alerts |
+| **Fan Boost** | Real SMC fan control via `tilde-fan` (admin password once per login) |
+| **AI budget** | Codex ⇄ Cursor remaining % in one tap-to-cycle card |
+| **Agent attention** | Herdr inventory, blockers first, one-click focus back to the terminal |
+| **Trust packet** | Prototype Git / build / CI signals — no opaque “AI confidence” |
+| **Recovery** | Per-project capsule (metadata only) so you can resume cleanly |
+| **Focus modes** | Ship · Meet · Battery presets |
+| **Today diary** | Local JSONL of builds, focus, slowdowns, agent events |
+
+## Quick start
+
+**Needs:** macOS 14+ · Swift 6.1+  
+Xcode is optional for SwiftPM runs; required for XCTest, signing, and distribution.
 
 ```sh
 git clone https://github.com/Le0wang06/Tilde.git
@@ -130,9 +144,16 @@ Declare checks in `.tilde/verify.json`. Tilde shows every command and requires *
 
 ## Docs
 
-- [AI Control Plane](Docs/AI-Control-Plane.md)
-- [Phase 0 Feasibility](Docs/Phase-0-Feasibility.md)
+- [Making Tilde genuinely useful](Docs/Tilde-Usefulness-Study.md) — research, market audit, product decision, and phased roadmap
+- [AI Control Plane](Docs/AI-Control-Plane.md) — promise, shipped slice, next steps  
+- [Phase 0 Feasibility](Docs/Phase-0-Feasibility.md) — measured results and limits  
 - [Contribution workflow](AGENTS.md)
+
+## Status
+
+Phase 0 diagnostics are solid. Research now points to a change-centered decision queue with exact,
+fingerprint-bound verification receipts. The current trust packet is a prototype and must not be
+treated as proof until the Phase 0 truthfulness gates in the product study pass.
 
 ---
 
