@@ -288,6 +288,7 @@ final class DiagnosticViewModel: ObservableObject {
                     self.publishMenuBarTitle(
                         codex: report.codex,
                         cursor: report.cursor,
+                        claude: report.claude,
                         build: snapshot,
                         slowdown: self.slowdown,
                         project: self.projectContext,
@@ -310,6 +311,7 @@ final class DiagnosticViewModel: ObservableObject {
                     self.publishMenuBarTitle(
                         codex: report.codex,
                         cursor: report.cursor,
+                        claude: report.claude,
                         build: self.buildPulse,
                         slowdown: self.slowdown,
                         project: self.projectContext,
@@ -344,6 +346,7 @@ final class DiagnosticViewModel: ObservableObject {
                     self.publishMenuBarTitle(
                         codex: report.codex,
                         cursor: report.cursor,
+                        claude: report.claude,
                         build: self.buildPulse,
                         slowdown: self.slowdown,
                         project: self.projectContext,
@@ -502,10 +505,22 @@ final class DiagnosticViewModel: ObservableObject {
                     observedFrom: Calendar.current.startOfDay(for: Date())
                 )
             )
+            let demoClaude = ClaudeUsageSnapshot(
+                dailySpend: DailySpendReading(
+                    provider: .claude,
+                    cents: 94,
+                    basis: .estimatedFromTokenBreakdown,
+                    observedFrom: Calendar.current.startOfDay(for: Date())
+                ),
+                sessionCount: 2,
+                pricedMessageCount: 14,
+                notes: ["API-price equivalent; Claude subscription usage may be included."]
+            )
             self.report = DiagnosticReport(
                 system: report.system,
                 codex: .available(demoCodex),
-                cursor: .available(demoCursor)
+                cursor: .available(demoCursor),
+                claude: .available(demoClaude)
             )
         }
 
@@ -675,7 +690,7 @@ final class DiagnosticViewModel: ObservableObject {
             lastSucceeded: true
         )
 
-        menuBarTitle = "! ≈$4.38"
+        menuBarTitle = "! ≈$5.32"
         MenuBarStatusItemController.shared.updateTitle(menuBarTitle, needsAttention: true)
         refreshDecisionQueue()
     }
@@ -703,6 +718,7 @@ final class DiagnosticViewModel: ObservableObject {
         publishMenuBarTitle(
             codex: report.codex,
             cursor: report.cursor,
+            claude: report.claude,
             build: buildPulse,
             slowdown: advice,
             project: projectContext,
@@ -720,6 +736,7 @@ final class DiagnosticViewModel: ObservableObject {
     private func publishMenuBarTitle(
         codex: Availability<CodexDiagnosticSnapshot>,
         cursor: Availability<CursorUsageSnapshot>,
+        claude: Availability<ClaudeUsageSnapshot>,
         build: BuildPulseSnapshot,
         slowdown: SlowdownAdvice,
         project: ProjectContextSnapshot,
@@ -729,6 +746,7 @@ final class DiagnosticViewModel: ObservableObject {
         menuBarTitle = Self.makeMenuBarTitle(
             from: codex,
             cursor: cursor,
+            claude: claude,
             needsAttention: needsAttention
         )
         MenuBarStatusItemController.shared.updateTitle(menuBarTitle, needsAttention: needsAttention)
@@ -745,11 +763,13 @@ final class DiagnosticViewModel: ObservableObject {
     private static func makeMenuBarTitle(
         from codex: Availability<CodexDiagnosticSnapshot>,
         cursor: Availability<CursorUsageSnapshot>,
+        claude: Availability<ClaudeUsageSnapshot>,
         needsAttention: Bool = false
     ) -> String {
         let spend = DailyAISpendSummary(
             codex: codex.availableValue?.dailySpend,
-            cursor: cursor.availableValue?.dailySpend
+            cursor: cursor.availableValue?.dailySpend,
+            claude: claude.availableValue?.dailySpend
         )
         return MenuBarAttentionTitle.compose(
             spendText: spend.menuBarText,
@@ -768,6 +788,7 @@ final class DiagnosticViewModel: ObservableObject {
             publishMenuBarTitle(
                 codex: report.codex,
                 cursor: report.cursor,
+                claude: report.claude,
                 build: buildPulse,
                 slowdown: slowdown,
                 project: projectContext,
@@ -2089,7 +2110,8 @@ struct MenuBarPanel: View {
     private func agentCard(_ report: DiagnosticReport) -> some View {
         let spend = DailyAISpendSummary(
             codex: report.codex.availableValue?.dailySpend,
-            cursor: report.cursor.availableValue?.dailySpend
+            cursor: report.cursor.availableValue?.dailySpend,
+            claude: report.claude.availableValue?.dailySpend
         )
         return ControlCenterCard {
             VStack(alignment: .leading, spacing: 7) {
@@ -2108,7 +2130,7 @@ struct MenuBarPanel: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
                 if spend.containsEstimate {
-                    Text("Estimate · official credit rates + local token mix")
+                    Text("Estimate · API rates; subscriptions may include usage")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 } else if !spend.hasCompleteProviderCoverage, spend.knownTotalCents != nil {

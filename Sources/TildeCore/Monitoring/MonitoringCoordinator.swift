@@ -10,6 +10,7 @@ public actor MonitoringCoordinator {
     private let sensorProvider: StubAdvancedSensorProvider
     private let codexProvider: CodexAppServerProbe
     private let cursorProvider: CursorUsageProbe
+    private let claudeProvider: ClaudeUsageProbe
 
     public init(
         cpuProvider: CPUProvider = CPUProvider(),
@@ -20,7 +21,8 @@ public actor MonitoringCoordinator {
         thermalProvider: ThermalProvider = ThermalProvider(),
         sensorProvider: StubAdvancedSensorProvider = StubAdvancedSensorProvider(),
         codexProvider: CodexAppServerProbe = CodexAppServerProbe(),
-        cursorProvider: CursorUsageProbe = CursorUsageProbe()
+        cursorProvider: CursorUsageProbe = CursorUsageProbe(),
+        claudeProvider: ClaudeUsageProbe = ClaudeUsageProbe()
     ) {
         self.cpuProvider = cpuProvider
         self.memoryProvider = memoryProvider
@@ -31,17 +33,22 @@ public actor MonitoringCoordinator {
         self.sensorProvider = sensorProvider
         self.codexProvider = codexProvider
         self.cursorProvider = cursorProvider
+        self.claudeProvider = claudeProvider
     }
 
     public func runDiagnostics() async -> DiagnosticReport {
         async let system = runSystemDiagnostics()
         async let codex = runCodexDiagnostics()
         async let cursor = runCursorDiagnostics()
-        return await DiagnosticReport(system: system, codex: codex, cursor: cursor)
+        async let claude = runClaudeDiagnostics()
+        return await DiagnosticReport(system: system, codex: codex, cursor: cursor, claude: claude)
     }
 
     public func runSystemDiagnostics() async -> SystemSnapshot {
-        await sampleSystem(previous: nil, metrics: Set(LiveMetric.allCases.filter { $0 != .codex && $0 != .cursor }))
+        await sampleSystem(
+            previous: nil,
+            metrics: Set(LiveMetric.allCases.filter { $0 != .codex && $0 != .cursor && $0 != .claude })
+        )
     }
 
     public func runCodexDiagnostics() async -> Availability<CodexDiagnosticSnapshot> {
@@ -50,6 +57,10 @@ public actor MonitoringCoordinator {
 
     public func runCursorDiagnostics() async -> Availability<CursorUsageSnapshot> {
         await capture { try await self.cursorProvider.fetchSnapshot() }
+    }
+
+    public func runClaudeDiagnostics() async -> Availability<ClaudeUsageSnapshot> {
+        await capture { try await self.claudeProvider.fetchSnapshot() }
     }
 
     public func sampleSystem(previous: SystemSnapshot?, metrics: Set<LiveMetric>) async -> SystemSnapshot {

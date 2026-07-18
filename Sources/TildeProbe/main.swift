@@ -16,6 +16,7 @@ struct TildeProbe {
         print("GPU                   \(status(report.system.advancedSensors.gpuUsage))")
         print("Fan                   \(status(report.system.advancedSensors.fanSpeeds))")
         print("Codex Connection      \(status(report.codex))")
+        print("Claude Connection     \(status(report.claude))")
 
         let attention = await HerdrAgentProvider().snapshot()
         if attention.providerAvailable {
@@ -55,6 +56,18 @@ struct TildeProbe {
             print("Codex Threads         \(codex.threadCount == nil ? "Unavailable" : "Working")")
             for note in codex.notes {
                 print("Codex Note            \(note)")
+            }
+        }
+
+        if case .available(let claude) = report.claude {
+            if let spend = claude.dailySpend {
+                print("Claude Cost Today     ≈\(DailyAISpendSummary.usd(spend.cents)) API-price equivalent")
+            } else {
+                print("Claude Cost Today     Unavailable")
+            }
+            print("Claude Sessions       \(claude.sessionCount)")
+            for note in claude.notes {
+                print("Claude Note           \(note)")
             }
         }
     }

@@ -23,7 +23,7 @@ import Testing
         now: start.addingTimeInterval(60),
         isForeground: true
     )
-    #expect(afterSixtySeconds == Set(LiveMetric.allCases).subtracting([.cursor]))
+    #expect(afterSixtySeconds == Set(LiveMetric.allCases).subtracting([.cursor, .claude]))
 }
 
 @Test func adaptivePolicySlowsSamplingInBackground() {
@@ -95,6 +95,10 @@ private actor FakeLiveCoordinator: LiveDiagnosticCoordinating {
     }
 
     func runCursorDiagnostics() async -> Availability<CursorUsageSnapshot> {
+        .unavailable(reason: "Not sampled")
+    }
+
+    func runClaudeDiagnostics() async -> Availability<ClaudeUsageSnapshot> {
         .unavailable(reason: "Not sampled")
     }
 
