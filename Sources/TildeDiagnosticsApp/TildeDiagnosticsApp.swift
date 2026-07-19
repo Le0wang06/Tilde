@@ -1416,6 +1416,7 @@ struct MenuBarPanel: View {
     @State private var presentationID = UUID()
     @State private var agentPane: AgentPane = .codex
     @State private var isDecisionQueueExpanded = false
+    @State private var isAgentListExpanded = false
 
     private let panelWidth: CGFloat = 332
     private let maxPanelHeight: CGFloat = 460
@@ -1448,6 +1449,7 @@ struct MenuBarPanel: View {
         .onDisappear {
             model.setPresentation(presentationID, isActive: false)
             isDecisionQueueExpanded = false
+            isAgentListExpanded = false
         }
     }
 
@@ -1660,52 +1662,74 @@ struct MenuBarPanel: View {
         let visible = Array(available.prefix(4))
 
         return ControlCenterCard {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 6) {
-                    Image(systemName: attention.isEmpty ? "sparkles" : "exclamationmark.bubble.fill")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(attention.isEmpty ? Color.secondary : Color.orange)
-                    Text(attention.isEmpty ? "AGENTS · AVAILABLE" : "AGENTS · NEED YOU")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text("\(model.agentAttention.agents.count)")
-                        .font(.caption2.weight(.bold).monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-
-                ForEach(visible) { agent in
-                    Button {
-                        model.focusAgent(agent)
-                    } label: {
-                        HStack(spacing: 7) {
-                            Circle()
-                                .fill(agentStateColor(agent.state))
-                                .frame(width: 7, height: 7)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text("\(agent.projectName) · \(agent.agent.capitalized)")
-                                    .font(.caption.weight(.semibold))
-                                    .lineLimit(1)
-                                Text(agent.branch.map { "\(agent.state.label) · \($0)" } ?? agent.state.label)
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                            Spacer(minLength: 4)
-                            Image(systemName: "arrow.up.forward.app")
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.tertiary)
-                        }
-                        .contentShape(Rectangle())
+            VStack(alignment: .leading, spacing: 0) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.16)) {
+                        isAgentListExpanded.toggle()
                     }
-                    .buttonStyle(.plain)
-                    .help("Focus this agent in Herdr")
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: attention.isEmpty ? "sparkles" : "exclamationmark.bubble.fill")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(attention.isEmpty ? Color.secondary : Color.orange)
+                        Text(attention.isEmpty ? "AGENTS · AVAILABLE" : "AGENTS · NEED YOU")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text("\(model.agentAttention.agents.count)")
+                            .font(.caption2.weight(.bold).monospacedDigit())
+                            .foregroundStyle(.secondary)
+                        Image(systemName: "chevron.right")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.tertiary)
+                            .rotationEffect(.degrees(isAgentListExpanded ? 90 : 0))
+                    }
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(attention.isEmpty ? "Agents available" : "Agents needing attention"), \(model.agentAttention.agents.count)")
+                .accessibilityHint(isAgentListExpanded ? "Collapse agent list" : "Expand agent list")
 
-                if available.count > visible.count {
-                    Text("+\(available.count - visible.count) more available")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                if isAgentListExpanded {
+                    Divider()
+                        .padding(.vertical, 7)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(visible) { agent in
+                            Button {
+                                model.focusAgent(agent)
+                            } label: {
+                                HStack(spacing: 7) {
+                                    Circle()
+                                        .fill(agentStateColor(agent.state))
+                                        .frame(width: 7, height: 7)
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text("\(agent.projectName) · \(agent.agent.capitalized)")
+                                            .font(.caption.weight(.semibold))
+                                            .lineLimit(1)
+                                        Text(agent.branch.map { "\(agent.state.label) · \($0)" } ?? agent.state.label)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                    Spacer(minLength: 4)
+                                    Image(systemName: "arrow.up.forward.app")
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(.tertiary)
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .help("Focus this agent in Herdr")
+                        }
+
+                        if available.count > visible.count {
+                            Text("+\(available.count - visible.count) more available")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
         }
