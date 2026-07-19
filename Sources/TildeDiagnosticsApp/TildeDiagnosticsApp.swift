@@ -1415,6 +1415,8 @@ struct MenuBarPanel: View {
     @EnvironmentObject private var model: DiagnosticViewModel
     @State private var presentationID = UUID()
     @State private var agentPane: AgentPane = .codex
+    @State private var isDecisionQueueExpanded = false
+    @State private var isAgentListExpanded = false
 
     private let panelWidth: CGFloat = 332
     private let maxPanelHeight: CGFloat = 460
@@ -1444,7 +1446,11 @@ struct MenuBarPanel: View {
                 .fill(.ultraThinMaterial)
         }
         .onAppear { model.setPresentation(presentationID, isActive: true) }
-        .onDisappear { model.setPresentation(presentationID, isActive: false) }
+        .onDisappear {
+            model.setPresentation(presentationID, isActive: false)
+            isDecisionQueueExpanded = false
+            isAgentListExpanded = false
+        }
     }
 
     @ViewBuilder
@@ -1515,17 +1521,8 @@ struct MenuBarPanel: View {
         let decisions = model.decisionQueue.needsYouItems
 
         VStack(spacing: 8) {
-            if decisions.isEmpty {
-                decisionSection(model.decisionQueue.topItem)
-            } else {
-                ForEach(Array(decisions.enumerated()), id: \.element.id) { index, item in
-                    if index == 0 {
-                        decisionCard(item)
-                    } else {
-                        compactDecisionCard(item)
-                    }
-                }
-                decisionActivityStrip
+            if let topDecision = decisions.first {
+                decisionQueueSummary(topDecision, items: decisions)
             }
 
             if model.agentAttention.providerAvailable,
@@ -1553,185 +1550,102 @@ struct MenuBarPanel: View {
         }
     }
 
-    @ViewBuilder
-    private func decisionSection(_ item: DecisionQueueItem?) -> some View {
-        if let item, item.needsYou {
-            decisionCard(item)
-        } else if let item {
-            decisionIdleStrip(item)
-        } else {
-            decisionEmptyStrip
-        }
-    }
+    private func decisionQueueSummary(
+        _ topItem: DecisionQueueItem,
+        items: [DecisionQueueItem]
+    ) -> some View {
+        let tint = decisionTint(topItem)
+        let countLabel = items.count == 1 ? "1 CHANGE NEEDS YOU" : "\(items.count) CHANGES NEED YOU"
 
-    private func decisionCard(_ item: DecisionQueueItem) -> some View {
-        let tint = decisionTint(item)
         return ControlCenterCard {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text("Needs you")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(tint)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(
-                            Capsule(style: .continuous)
-                                .fill(tint.opacity(0.14))
-                        )
-                    Spacer(minLength: 4)
-                    Text(item.subtitle)
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(item.projectName)
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-                    Text(item.branch.map { "branch \($0)" } ?? "detached HEAD")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-
-                VStack(alignment: .leading, spacing: 5) {
-                    ForEach(item.reasons) { reason in
-                        HStack(alignment: .top, spacing: 7) {
-                            Text(reasonGlyph(reason.severity))
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(reasonColor(reason.severity))
-                                .frame(width: 12, alignment: .center)
-                            Text(reason.message)
-                                .font(.caption)
-                                .foregroundStyle(.primary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
+            VStack(alignment: .leading, spacing: 0) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.16)) {
+                        isDecisionQueueExpanded.toggle()
                     }
-                }
-
-                if let primary = item.primaryAction {
-                    Button {
-                        model.performDecisionAction(primary, for: item)
-                    } label: {
-                        Text(primary.title)
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.circle.fill")
                             .font(.caption.weight(.semibold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 8)
-                            .foregroundStyle(.white)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .fill(tint)
-                            )
+                            .foregroundStyle(tint)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(countLabel)
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(.secondary)
+                            Text("\(topItem.projectName) · \(topItem.subtitle)")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                        }
+                        Spacer(minLength: 4)
+                        Image(systemName: "chevron.right")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.tertiary)
+                            .rotationEffect(.degrees(isDecisionQueueExpanded ? 90 : 0))
                     }
-                    .buttonStyle(.plain)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(countLabel). \(topItem.projectName), \(topItem.subtitle)")
+                .accessibilityHint(isDecisionQueueExpanded ? "Collapse decision queue" : "Expand decision queue")
 
-                    if !item.secondaryActions.isEmpty {
-                        HStack(spacing: 8) {
-                            ForEach(item.secondaryActions) { action in
-                                Button {
-                                    model.performDecisionAction(action, for: item)
-                                } label: {
-                                    Text(action.title)
-                                        .font(.caption2.weight(.semibold))
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 6)
-                                        .foregroundStyle(.primary)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                                .fill(Color.primary.opacity(0.06))
-                                        )
-                                }
-                                .buttonStyle(.plain)
-                            }
+                if isDecisionQueueExpanded {
+                    Divider()
+                        .padding(.vertical, 8)
+
+                    VStack(spacing: 9) {
+                        ForEach(items) { item in
+                            decisionQueueRow(item)
                         }
                     }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
         }
     }
 
-    private func compactDecisionCard(_ item: DecisionQueueItem) -> some View {
+    private func decisionQueueRow(_ item: DecisionQueueItem) -> some View {
         let tint = decisionTint(item)
-        return ControlCenterCard {
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(tint)
-                    .frame(width: 7, height: 7)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(item.projectName)
-                        .font(.caption.weight(.semibold))
-                        .lineLimit(1)
-                    Text(item.reasons.first?.message ?? item.subtitle)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                Spacer(minLength: 4)
-                if let primary = item.primaryAction {
-                    Button(primary.title) {
-                        model.performDecisionAction(primary, for: item)
-                    }
-                    .font(.caption2.weight(.semibold))
-                    .buttonStyle(.plain)
-                    .foregroundStyle(tint)
-                }
+        return HStack(spacing: 7) {
+            Circle()
+                .fill(tint)
+                .frame(width: 7, height: 7)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(item.projectName)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                Text(item.reasons.first?.message ?? item.subtitle)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
-        }
-    }
-
-    private var decisionActivityStrip: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "ellipsis.circle")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            Text("\(model.decisionQueue.workingCount) working · \(model.decisionQueue.idleCount) idle")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
             Spacer(minLength: 0)
-            Text("\(model.decisionQueue.items.count) changes")
-                .font(.caption2.monospacedDigit())
-                .foregroundStyle(.tertiary)
-        }
-        .padding(.horizontal, 4)
-    }
-
-    private func decisionIdleStrip(_ item: DecisionQueueItem) -> some View {
-        ControlCenterCard {
-            HStack(spacing: 8) {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.green)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Nothing needs you")
-                        .font(.caption.weight(.semibold))
-                    Text("\(item.projectName) · \(item.subtitle)")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+            if let primary = item.primaryAction {
+                Button(primary.title) {
+                    model.performDecisionAction(primary, for: item)
                 }
-                Spacer(minLength: 0)
-                if let primary = item.primaryAction {
-                    Button(primary.title) {
-                        model.performDecisionAction(primary, for: item)
-                    }
-                    .font(.caption2.weight(.semibold))
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                }
+                .font(.caption2.weight(.semibold))
+                .buttonStyle(.plain)
+                .foregroundStyle(tint)
+                .help("\(primary.title) for \(item.projectName)")
             }
-        }
-    }
-
-    private var decisionEmptyStrip: some View {
-        ControlCenterCard {
-            HStack(spacing: 8) {
-                Image(systemName: "tray")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Text("No active change yet")
-                    .font(.caption.weight(.semibold))
-                Spacer(minLength: 0)
+            if !item.secondaryActions.isEmpty {
+                Menu {
+                    ForEach(item.secondaryActions) { action in
+                        Button(action.title) {
+                            model.performDecisionAction(action, for: item)
+                        }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 16, height: 18)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("More actions for \(item.projectName)")
             }
         }
     }
@@ -1742,75 +1656,80 @@ struct MenuBarPanel: View {
         return .accentColor
     }
 
-    private func reasonGlyph(_ severity: DecisionSeverity) -> String {
-        switch severity {
-        case .pass: return "✓"
-        case .warn, .fail: return "!"
-        case .info: return "·"
-        }
-    }
-
-    private func reasonColor(_ severity: DecisionSeverity) -> Color {
-        switch severity {
-        case .pass: return .green
-        case .warn: return .orange
-        case .fail: return .red
-        case .info: return .secondary
-        }
-    }
-
     private var attentionCard: some View {
         let attention = model.agentAttention.attentionItems
         let available = model.agentAttention.displayItems
         let visible = Array(available.prefix(4))
 
         return ControlCenterCard {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 6) {
-                    Image(systemName: attention.isEmpty ? "sparkles" : "exclamationmark.bubble.fill")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(attention.isEmpty ? Color.secondary : Color.orange)
-                    Text(attention.isEmpty ? "AGENTS · AVAILABLE" : "AGENTS · NEED YOU")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text("\(model.agentAttention.agents.count)")
-                        .font(.caption2.weight(.bold).monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-
-                ForEach(visible) { agent in
-                    Button {
-                        model.focusAgent(agent)
-                    } label: {
-                        HStack(spacing: 7) {
-                            Circle()
-                                .fill(agentStateColor(agent.state))
-                                .frame(width: 7, height: 7)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text("\(agent.projectName) · \(agent.agent.capitalized)")
-                                    .font(.caption.weight(.semibold))
-                                    .lineLimit(1)
-                                Text(agent.branch.map { "\(agent.state.label) · \($0)" } ?? agent.state.label)
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                            Spacer(minLength: 4)
-                            Image(systemName: "arrow.up.forward.app")
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.tertiary)
-                        }
-                        .contentShape(Rectangle())
+            VStack(alignment: .leading, spacing: 0) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.16)) {
+                        isAgentListExpanded.toggle()
                     }
-                    .buttonStyle(.plain)
-                    .help("Focus this agent in Herdr")
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: attention.isEmpty ? "sparkles" : "exclamationmark.bubble.fill")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(attention.isEmpty ? Color.secondary : Color.orange)
+                        Text(attention.isEmpty ? "AGENTS · AVAILABLE" : "AGENTS · NEED YOU")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text("\(model.agentAttention.agents.count)")
+                            .font(.caption2.weight(.bold).monospacedDigit())
+                            .foregroundStyle(.secondary)
+                        Image(systemName: "chevron.right")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.tertiary)
+                            .rotationEffect(.degrees(isAgentListExpanded ? 90 : 0))
+                    }
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(attention.isEmpty ? "Agents available" : "Agents needing attention"), \(model.agentAttention.agents.count)")
+                .accessibilityHint(isAgentListExpanded ? "Collapse agent list" : "Expand agent list")
 
-                if available.count > visible.count {
-                    Text("+\(available.count - visible.count) more available")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                if isAgentListExpanded {
+                    Divider()
+                        .padding(.vertical, 7)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(visible) { agent in
+                            Button {
+                                model.focusAgent(agent)
+                            } label: {
+                                HStack(spacing: 7) {
+                                    Circle()
+                                        .fill(agentStateColor(agent.state))
+                                        .frame(width: 7, height: 7)
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text("\(agent.projectName) · \(agent.agent.capitalized)")
+                                            .font(.caption.weight(.semibold))
+                                            .lineLimit(1)
+                                        Text(agent.branch.map { "\(agent.state.label) · \($0)" } ?? agent.state.label)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                    Spacer(minLength: 4)
+                                    Image(systemName: "arrow.up.forward.app")
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(.tertiary)
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .help("Focus this agent in Herdr")
+                        }
+
+                        if available.count > visible.count {
+                            Text("+\(available.count - visible.count) more available")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
         }

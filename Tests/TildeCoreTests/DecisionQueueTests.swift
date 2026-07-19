@@ -160,6 +160,29 @@ struct DecisionQueueTests {
         #expect(queue.topItem?.subtitle == "Needs input")
     }
 
+    @Test("Expanded queue keeps every change that needs a decision")
+    func expandedQueueKeepsEveryDecision() {
+        let changes = (0..<5).map { index in
+            let root = "/tmp/demo-app-\(index)"
+            return DecisionQueueEvidence(
+                project: ProjectContextSnapshot(
+                    projectName: "demo-app-\(index)",
+                    rootPath: root,
+                    branch: "feature/\(index)"
+                ),
+                trust: TrustPacketSnapshot(state: .ready, projectRoot: root, changedFiles: 1),
+                verification: VerificationSnapshot(state: .missing, projectRoot: root)
+            )
+        }
+
+        let queue = DecisionQueueComposer.compose(
+            changes: changes,
+            agents: AgentAttentionSnapshot(agents: [], providerAvailable: true)
+        )
+
+        #expect(queue.needsYouItems.count == 5)
+    }
+
     @Test("Exact evidence for each worktree stays attached to its own card")
     func evidenceStaysScopedToWorktree() {
         let first = DecisionQueueEvidence(
