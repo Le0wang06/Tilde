@@ -288,6 +288,7 @@ final class DiagnosticViewModel: ObservableObject {
                     self.publishMenuBarTitle(
                         codex: report.codex,
                         cursor: report.cursor,
+                        claude: report.claude,
                         build: snapshot,
                         slowdown: self.slowdown,
                         project: self.projectContext,
@@ -310,6 +311,7 @@ final class DiagnosticViewModel: ObservableObject {
                     self.publishMenuBarTitle(
                         codex: report.codex,
                         cursor: report.cursor,
+                        claude: report.claude,
                         build: self.buildPulse,
                         slowdown: self.slowdown,
                         project: self.projectContext,
@@ -344,6 +346,7 @@ final class DiagnosticViewModel: ObservableObject {
                     self.publishMenuBarTitle(
                         codex: report.codex,
                         cursor: report.cursor,
+                        claude: report.claude,
                         build: self.buildPulse,
                         slowdown: self.slowdown,
                         project: self.projectContext,
@@ -502,10 +505,22 @@ final class DiagnosticViewModel: ObservableObject {
                     observedFrom: Calendar.current.startOfDay(for: Date())
                 )
             )
+            let demoClaude = ClaudeUsageSnapshot(
+                dailySpend: DailySpendReading(
+                    provider: .claude,
+                    cents: 94,
+                    basis: .estimatedFromTokenBreakdown,
+                    observedFrom: Calendar.current.startOfDay(for: Date())
+                ),
+                sessionCount: 2,
+                pricedMessageCount: 14,
+                notes: ["API-price equivalent; Claude subscription usage may be included."]
+            )
             self.report = DiagnosticReport(
                 system: report.system,
                 codex: .available(demoCodex),
-                cursor: .available(demoCursor)
+                cursor: .available(demoCursor),
+                claude: .available(demoClaude)
             )
         }
 
@@ -675,7 +690,7 @@ final class DiagnosticViewModel: ObservableObject {
             lastSucceeded: true
         )
 
-        menuBarTitle = "! ≈$4.38"
+        menuBarTitle = "! ≈$5.32"
         MenuBarStatusItemController.shared.updateTitle(menuBarTitle, needsAttention: true)
         refreshDecisionQueue()
     }
@@ -703,6 +718,7 @@ final class DiagnosticViewModel: ObservableObject {
         publishMenuBarTitle(
             codex: report.codex,
             cursor: report.cursor,
+            claude: report.claude,
             build: buildPulse,
             slowdown: advice,
             project: projectContext,
@@ -720,6 +736,7 @@ final class DiagnosticViewModel: ObservableObject {
     private func publishMenuBarTitle(
         codex: Availability<CodexDiagnosticSnapshot>,
         cursor: Availability<CursorUsageSnapshot>,
+        claude: Availability<ClaudeUsageSnapshot>,
         build: BuildPulseSnapshot,
         slowdown: SlowdownAdvice,
         project: ProjectContextSnapshot,
@@ -729,6 +746,7 @@ final class DiagnosticViewModel: ObservableObject {
         menuBarTitle = Self.makeMenuBarTitle(
             from: codex,
             cursor: cursor,
+            claude: claude,
             needsAttention: needsAttention
         )
         MenuBarStatusItemController.shared.updateTitle(menuBarTitle, needsAttention: needsAttention)
@@ -745,11 +763,13 @@ final class DiagnosticViewModel: ObservableObject {
     private static func makeMenuBarTitle(
         from codex: Availability<CodexDiagnosticSnapshot>,
         cursor: Availability<CursorUsageSnapshot>,
+        claude: Availability<ClaudeUsageSnapshot>,
         needsAttention: Bool = false
     ) -> String {
         let spend = DailyAISpendSummary(
             codex: codex.availableValue?.dailySpend,
-            cursor: cursor.availableValue?.dailySpend
+            cursor: cursor.availableValue?.dailySpend,
+            claude: claude.availableValue?.dailySpend
         )
         return MenuBarAttentionTitle.compose(
             spendText: spend.menuBarText,
@@ -768,6 +788,7 @@ final class DiagnosticViewModel: ObservableObject {
             publishMenuBarTitle(
                 codex: report.codex,
                 cursor: report.cursor,
+                claude: report.claude,
                 build: buildPulse,
                 slowdown: slowdown,
                 project: projectContext,
@@ -2089,7 +2110,8 @@ struct MenuBarPanel: View {
     private func agentCard(_ report: DiagnosticReport) -> some View {
         let spend = DailyAISpendSummary(
             codex: report.codex.availableValue?.dailySpend,
-            cursor: report.cursor.availableValue?.dailySpend
+            cursor: report.cursor.availableValue?.dailySpend,
+            claude: report.claude.availableValue?.dailySpend
         )
         return ControlCenterCard {
             VStack(alignment: .leading, spacing: 7) {
@@ -2097,24 +2119,23 @@ struct MenuBarPanel: View {
                     Text("AI SPEND · TODAY")
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(.secondary)
+                    Image(systemName: "info.circle")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .help("Reported values come from providers. Observed values track local meter changes. Estimates use token usage at API rates; subscriptions may include usage.")
                     Spacer(minLength: 4)
                     Text(spend.knownTotalCents.map {
                         "\(spend.containsEstimate ? "≈" : "")\(DailyAISpendSummary.usd($0))"
                     } ?? "$—")
                         .font(.title3.weight(.semibold).monospacedDigit())
                 }
-                Text(spend.detailText)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                if spend.containsEstimate {
-                    Text("Estimate · official credit rates + local token mix")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                } else if !spend.hasCompleteProviderCoverage, spend.knownTotalCents != nil {
-                    Text("Lower bound · missing provider or pre-tracking spend")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
+
+                HStack(spacing: 0) {
+                    spendProviderCell(.cursor, reading: spend.cursor)
+                    Divider().frame(height: 38)
+                    spendProviderCell(.codex, reading: spend.codex)
+                    Divider().frame(height: 38)
+                    spendProviderCell(.claude, reading: spend.claude)
                 }
 
                 Divider()
@@ -2171,6 +2192,52 @@ struct MenuBarPanel: View {
                     )
                 }
             }
+        }
+    }
+
+    private func spendProviderCell(
+        _ provider: AISpendProvider,
+        reading: DailySpendReading?
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(provider.label.uppercased())
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.secondary)
+            Text(reading.map { DailyAISpendSummary.usd($0.cents) } ?? "—")
+                .font(.caption.weight(.semibold).monospacedDigit())
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Text(spendBasisLabel(reading))
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.leading, provider == .cursor ? 0 : 8)
+        .help(spendReadingHelp(provider, reading: reading))
+    }
+
+    private func spendBasisLabel(_ reading: DailySpendReading?) -> String {
+        guard let reading else { return "No data" }
+        switch reading.basis {
+        case .providerReported: return "Reported"
+        case .locallyObservedDelta: return "Observed"
+        case .estimatedFromTokenBreakdown: return "Estimated"
+        }
+    }
+
+    private func spendReadingHelp(
+        _ provider: AISpendProvider,
+        reading: DailySpendReading?
+    ) -> String {
+        guard let reading else { return "\(provider.label) has not reported spend today." }
+        switch reading.basis {
+        case .providerReported:
+            return "\(provider.label) reported this total for today."
+        case .locallyObservedDelta:
+            return "Tilde observed this \(provider.label) meter change locally; earlier spend may be missing."
+        case .estimatedFromTokenBreakdown:
+            return "Estimated from \(provider.label) token usage at API rates; subscription usage may be included."
         }
     }
 

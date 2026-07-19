@@ -4,6 +4,7 @@ public protocol LiveDiagnosticCoordinating: Sendable {
     func sampleSystem(previous: SystemSnapshot?, metrics: Set<LiveMetric>) async -> SystemSnapshot
     func runCodexDiagnostics() async -> Availability<CodexDiagnosticSnapshot>
     func runCursorDiagnostics() async -> Availability<CursorUsageSnapshot>
+    func runClaudeDiagnostics() async -> Availability<ClaudeUsageSnapshot>
 }
 
 extension MonitoringCoordinator: LiveDiagnosticCoordinating {}
@@ -116,10 +117,11 @@ public actor LiveMonitoringService {
         let due = forceAll
             ? Set(LiveMetric.allCases)
             : policy.dueMetrics(lastSampled: lastSampled, now: now, isForeground: isForeground)
-        let systemMetrics = due.subtracting([.codex, .cursor])
+        let systemMetrics = due.subtracting([.codex, .cursor, .claude])
         let previousSystem = latestReport?.system
         let needsCodex = due.contains(.codex)
         let needsCursor = due.contains(.cursor)
+        let needsClaude = due.contains(.claude)
 
         let system = await coordinator.sampleSystem(previous: previousSystem, metrics: systemMetrics)
 
@@ -137,7 +139,14 @@ public actor LiveMonitoringService {
             cursor = latestReport?.cursor ?? .unavailable(reason: "Waiting for first Cursor sample")
         }
 
-        let report = DiagnosticReport(system: system, codex: codex, cursor: cursor)
+        let claude: Availability<ClaudeUsageSnapshot>
+        if needsClaude {
+            claude = await coordinator.runClaudeDiagnostics()
+        } else {
+            claude = latestReport?.claude ?? .unavailable(reason: "Waiting for first Claude sample")
+        }
+
+        let report = DiagnosticReport(system: system, codex: codex, cursor: cursor, claude: claude)
 
         for metric in due {
             lastSampled[metric] = now

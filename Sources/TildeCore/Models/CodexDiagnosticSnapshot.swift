@@ -116,14 +116,17 @@ public struct DiagnosticReport: Sendable {
     public let system: SystemSnapshot
     public let codex: Availability<CodexDiagnosticSnapshot>
     public let cursor: Availability<CursorUsageSnapshot>
+    public let claude: Availability<ClaudeUsageSnapshot>
 
     public init(
         system: SystemSnapshot,
         codex: Availability<CodexDiagnosticSnapshot>,
-        cursor: Availability<CursorUsageSnapshot> = .unavailable(reason: "Waiting for first Cursor sample")
+        cursor: Availability<CursorUsageSnapshot> = .unavailable(reason: "Waiting for first Cursor sample"),
+        claude: Availability<ClaudeUsageSnapshot> = .unavailable(reason: "Waiting for first Claude sample")
     ) {
         self.system = system
         self.codex = codex
         self.cursor = cursor
+        self.claude = claude
     }
 }

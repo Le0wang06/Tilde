@@ -86,7 +86,7 @@ import Testing
     #expect(complete.menuBarText == "$4.38")
     #expect(partial.knownTotalCents == 155)
     #expect(partial.menuBarText == "$1.55")
-    #expect(partial.detailText == "Cursor $1.55 observed · Codex not reported")
+    #expect(partial.detailText == "Cursor $1.55 observed · Codex not reported · Claude not reported")
     #expect(unavailable.knownTotalCents == nil)
     #expect(unavailable.menuBarText == "$—")
 }
@@ -110,7 +110,126 @@ import Testing
 
     #expect(summary.containsEstimate)
     #expect(summary.menuBarText == "≈$55.38")
-    #expect(summary.detailText == "Cursor $0.00 observed · Codex ≈$55.38")
+    #expect(summary.detailText == "Cursor $0.00 observed · Codex ≈$55.38 · Claude not reported")
+}
+
+@Test func dailySpendSummaryIncludesClaudeAsAnEstimatedEquivalent() {
+    let start = Date(timeIntervalSince1970: 1_784_352_000)
+    let summary = DailyAISpendSummary(
+        codex: DailySpendReading(provider: .codex, cents: 126, basis: .providerReported, observedFrom: start),
+        cursor: DailySpendReading(provider: .cursor, cents: 312, basis: .providerReported, observedFrom: start),
+        claude: DailySpendReading(
+            provider: .claude,
+            cents: 94,
+            basis: .estimatedFromTokenBreakdown,
+            observedFrom: start
+        )
+    )
+
+    #expect(summary.knownTotalCents == 532)
+    #expect(summary.menuBarText == "≈$5.32")
+    #expect(summary.containsEstimate)
+    #expect(summary.detailText == "Cursor $3.12 · Codex $1.26 · Claude ≈$0.94")
+}
+
+@Test func claudeCostEstimatorPricesCacheClassesAndDeduplicatesMessages() throws {
+    let timestamp = try #require(ISO8601DateFormatter().date(from: "2026-07-18T12:00:00Z"))
+    let priced = ClaudeMessageTokenUsage(
+        sessionID: "session-a",
+        messageID: "message-a",
+        model: "claude-fable-5[1m]",
+        timestamp: timestamp,
+        inputTokens: 1_000_000,
+        cacheWriteFiveMinuteTokens: 1_000_000,
+        cacheWriteOneHourTokens: 1_000_000,
+        cacheReadTokens: 1_000_000,
+        outputTokens: 1_000_000
+    )
+    let duplicate = ClaudeMessageTokenUsage(
+        sessionID: "session-a",
+        messageID: "message-a",
+        model: "claude-fable-5[1m]",
+        timestamp: timestamp,
+        inputTokens: 100,
+        cacheWriteFiveMinuteTokens: 100,
+        cacheWriteOneHourTokens: 100,
+        cacheReadTokens: 100,
+        outputTokens: 100
+    )
+    let unknown = ClaudeMessageTokenUsage(
+        sessionID: "session-b",
+        messageID: "message-b",
+        model: "claude-future-unknown",
+        timestamp: timestamp,
+        inputTokens: 1_000,
+        cacheWriteFiveMinuteTokens: 0,
+        cacheWriteOneHourTokens: 0,
+        cacheReadTokens: 0,
+        outputTokens: 0
+    )
+
+    let estimate = try #require(ClaudeCostEstimator.estimate(messages: [priced, duplicate, unknown]))
+
+    #expect(estimate.cents == 9_350)
+    #expect(estimate.pricedMessageCount == 1)
+    #expect(estimate.totalMessageCount == 2)
+    #expect(estimate.sessionCount == 2)
+    #expect(estimate.unpricedModels == ["claude-future-unknown"])
+}
+
+@Test func claudeTranscriptParserReadsOnlyTodayUsageMetadata() throws {
+    let formatter = ISO8601DateFormatter()
+    let start = try #require(formatter.date(from: "2026-07-18T00:00:00Z"))
+    let end = try #require(formatter.date(from: "2026-07-19T00:00:00Z"))
+    let current = #"{"type":"assistant","timestamp":"2026-07-18T12:00:00Z","sessionId":"session-a","message":{"id":"message-a","model":"claude-sonnet-5","content":[{"type":"text","text":"private prompt"}],"usage":{"input_tokens":1000,"cache_creation_input_tokens":500,"cache_read_input_tokens":250,"output_tokens":100,"cache_creation":{"ephemeral_5m_input_tokens":300,"ephemeral_1h_input_tokens":200}}}}"#
+    let duplicate = #"{"type":"assistant","timestamp":"2026-07-18T12:00:01Z","sessionId":"session-a","message":{"id":"message-a","model":"claude-sonnet-5","usage":{"input_tokens":1000,"cache_creation_input_tokens":500,"cache_read_input_tokens":250,"output_tokens":100}}}"#
+    let outside = #"{"type":"assistant","timestamp":"2026-07-19T00:00:01Z","sessionId":"session-b","message":{"id":"message-b","model":"claude-fable-5","usage":{"input_tokens":9999,"output_tokens":9999}}}"#
+    let user = #"{"type":"user","timestamp":"2026-07-18T12:00:02Z","message":{"content":"assistant usage input_tokens 9999"}}"#
+    var parser = ClaudeTranscriptUsageParser()
+
+    for line in [current, duplicate, outside, user] {
+        parser.consume(lineData: Data(line.utf8), interval: start..<end)
+    }
+    let usage = try #require(parser.messages["session-a|message-a"])
+
+    #expect(parser.messages.count == 1)
+    #expect(usage.inputTokens == 1_000)
+    #expect(usage.cacheWriteFiveMinuteTokens == 300)
+    #expect(usage.cacheWriteOneHourTokens == 200)
+    #expect(usage.cacheReadTokens == 250)
+    #expect(usage.outputTokens == 100)
+}
+
+@Test func claudeUsageProbeIncrementallyAddsNewLocalAssistantUsage() async throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("tilde-claude-usage-\(UUID().uuidString)", isDirectory: true)
+    let projects = root.appendingPathComponent("projects", isDirectory: true)
+    let transcript = projects.appendingPathComponent("session.jsonl")
+    defer { try? FileManager.default.removeItem(at: root) }
+    try FileManager.default.createDirectory(at: projects, withIntermediateDirectories: true)
+
+    let now = Date()
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    let firstTimestamp = formatter.string(from: now.addingTimeInterval(-60))
+    let secondTimestamp = formatter.string(from: now.addingTimeInterval(-30))
+    let first = #"{"type":"assistant","timestamp":"\#(firstTimestamp)","sessionId":"session-a","message":{"id":"message-a","model":"claude-fable-5","usage":{"input_tokens":100000,"output_tokens":0}}}"#
+    let second = #"{"type":"assistant","timestamp":"\#(secondTimestamp)","sessionId":"session-a","message":{"id":"message-b","model":"claude-fable-5","usage":{"input_tokens":0,"output_tokens":20000}}}"#
+    try Data("\(first)\n".utf8).write(to: transcript)
+    let probe = ClaudeUsageProbe(environment: ["CLAUDE_CONFIG_DIR": root.path])
+
+    let initial = try await probe.fetchSnapshot(now: now)
+    let handle = try FileHandle(forWritingTo: transcript)
+    try handle.seekToEnd()
+    try handle.write(contentsOf: Data("\(second)\n".utf8))
+    try handle.close()
+    let updated = try await probe.fetchSnapshot(now: now)
+
+    #expect(initial.dailySpend?.cents == 100)
+    #expect(initial.pricedMessageCount == 1)
+    #expect(updated.dailySpend?.cents == 200)
+    #expect(updated.pricedMessageCount == 2)
+    #expect(updated.sessionCount == 1)
 }
 
 @Test func codexCostEstimatorUsesRawModelSpecificTokenClassesWithoutScaling() throws {

@@ -1,11 +1,13 @@
 import Foundation
 
 public enum AISpendProvider: String, Codable, CaseIterable, Sendable {
+    case claude
     case codex
     case cursor
 
     public var label: String {
         switch self {
+        case .claude: return "Claude"
         case .codex: return "Codex"
         case .cursor: return "Cursor"
         }
@@ -41,27 +43,37 @@ public struct DailySpendReading: Codable, Equatable, Sendable {
 }
 
 public struct DailyAISpendSummary: Equatable, Sendable {
+    public let claude: DailySpendReading?
     public let codex: DailySpendReading?
     public let cursor: DailySpendReading?
 
-    public init(codex: DailySpendReading?, cursor: DailySpendReading?) {
+    public init(
+        codex: DailySpendReading?,
+        cursor: DailySpendReading?,
+        claude: DailySpendReading? = nil
+    ) {
+        self.claude = claude
         self.codex = codex
         self.cursor = cursor
     }
 
     public var knownTotalCents: Int? {
-        let known = [codex, cursor].compactMap { $0 }
+        let known = [codex, cursor, claude].compactMap { $0 }
         guard !known.isEmpty else { return nil }
         return known.reduce(0) { $0 + $1.cents }
     }
 
-    /// True only when both providers report a value already scoped to today.
+    /// True only when every supported provider reports authoritative money already scoped to today.
     public var hasCompleteProviderCoverage: Bool {
-        codex?.basis == .providerReported && cursor?.basis == .providerReported
+        codex?.basis == .providerReported
+            && cursor?.basis == .providerReported
+            && claude?.basis == .providerReported
     }
 
     public var containsEstimate: Bool {
-        [codex, cursor].compactMap { $0 }.contains { $0.basis == .estimatedFromTokenBreakdown }
+        [codex, cursor, claude]
+            .compactMap { $0 }
+            .contains { $0.basis == .estimatedFromTokenBreakdown }
     }
 
     public var menuBarText: String {
@@ -71,7 +83,11 @@ public struct DailyAISpendSummary: Equatable, Sendable {
     }
 
     public var detailText: String {
-        [providerDetail(.cursor, reading: cursor), providerDetail(.codex, reading: codex)]
+        [
+            providerDetail(.cursor, reading: cursor),
+            providerDetail(.codex, reading: codex),
+            providerDetail(.claude, reading: claude),
+        ]
             .joined(separator: " · ")
     }
 
