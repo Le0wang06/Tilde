@@ -25,36 +25,35 @@ enum ReadmeAssetCapture {
         }
         // Let a few live samples fill the sparkline.
         try? await Task.sleep(for: .seconds(3))
-        model.applyReadmeDemoStubs()
-        try? await Task.sleep(for: .milliseconds(200))
-
         let repoRoot = findRepoRoot()
         let outDir = repoRoot.appendingPathComponent("Docs/assets", isDirectory: true)
         try? FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
 
+        // First-run state before demo data: shows the setup checklist as a new user sees it.
+        setSectionsExpanded(false)
+        if let image = renderPanel(model: model, appearance: .darkAqua) {
+            writePNG(image, to: outDir.appendingPathComponent("tilde-panel-first-run.png"))
+        }
+
+        model.applyReadmeDemoStubs()
+        try? await Task.sleep(for: .milliseconds(200))
+
         let panelURL = outDir.appendingPathComponent("tilde-panel-dark.png")
         let menuURL = outDir.appendingPathComponent("tilde-menubar.png")
 
-        // Exact panel render (full unscrolled height while capturing).
-        if let panelImage = renderPanel(model: model) {
-            writePNG(panelImage, to: panelURL)
+        // Default (collapsed sections) in dark and light, plus an expanded dark variant.
+        setSectionsExpanded(false)
+        if let image = renderPanel(model: model, appearance: .darkAqua) {
+            writePNG(image, to: panelURL)
         }
-
-        // Also try a live popover window capture; keep whichever is taller.
-        MenuBarStatusItemController.shared.showPopover()
-        try? await Task.sleep(for: .milliseconds(900))
-        let liveURL = outDir.appendingPathComponent("tilde-panel-live.png")
-        if let window = popoverWindow() {
-            captureWindow(window.windowNumber, to: liveURL)
-            if let live = NSImage(contentsOf: liveURL),
-               let panel = NSImage(contentsOf: panelURL),
-               live.size.height >= panel.size.height - 1 {
-                try? FileManager.default.removeItem(at: panelURL)
-                try? FileManager.default.moveItem(at: liveURL, to: panelURL)
-            } else {
-                try? FileManager.default.removeItem(at: liveURL)
-            }
+        if let image = renderPanel(model: model, appearance: .aqua) {
+            writePNG(image, to: outDir.appendingPathComponent("tilde-panel-light.png"))
         }
+        setSectionsExpanded(true)
+        if let image = renderPanel(model: model, appearance: .darkAqua) {
+            writePNG(image, to: outDir.appendingPathComponent("tilde-panel-dark-expanded.png"))
+        }
+        setSectionsExpanded(false)
 
         writeMenuBar(title: model.menuBarTitle, to: menuURL)
 
@@ -77,24 +76,32 @@ enum ReadmeAssetCapture {
             .max(by: { $0.frame.height < $1.frame.height })
     }
 
-    private static func renderPanel(model: DiagnosticViewModel) -> NSImage? {
+    private static func setSectionsExpanded(_ expanded: Bool) {
+        let defaults = UserDefaults.standard
+        for key in ["tilde.panel.system.expanded", "tilde.panel.spend.expanded", "tilde.panel.context.expanded"] {
+            defaults.set(expanded, forKey: key)
+        }
+    }
+
+    private static func renderPanel(model: DiagnosticViewModel, appearance: NSAppearance.Name) -> NSImage? {
+        let width = TildeDesign.Panel.width
         let root = MenuBarPanel()
             .environmentObject(model)
-            .frame(width: 332)
+            .frame(width: width)
         let host = NSHostingView(rootView: root)
-        host.appearance = NSAppearance(named: .darkAqua)
-        host.frame = NSRect(x: 0, y: 0, width: 332, height: 10)
+        host.appearance = NSAppearance(named: appearance)
+        host.frame = NSRect(x: 0, y: 0, width: width, height: 10)
 
         host.layoutSubtreeIfNeeded()
         var fitting = host.fittingSize
         if fitting.height < 100 {
             // First pass can be undersized before SwiftUI settles.
-            host.frame = NSRect(x: 0, y: 0, width: 332, height: 1200)
+            host.frame = NSRect(x: 0, y: 0, width: width, height: 1200)
             host.layoutSubtreeIfNeeded()
             fitting = host.fittingSize
         }
         let height = max(fitting.height, 320)
-        host.frame = NSRect(x: 0, y: 0, width: 332, height: height)
+        host.frame = NSRect(x: 0, y: 0, width: width, height: height)
         host.layoutSubtreeIfNeeded()
 
         guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return nil }

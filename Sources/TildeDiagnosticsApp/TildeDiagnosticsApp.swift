@@ -975,6 +975,27 @@ final class DiagnosticViewModel: ObservableObject {
         }
     }
 
+    func copyStarterVerificationProfile() {
+        let starter = """
+        {
+          "version": 1,
+          "base": "origin/main",
+          "checks": [
+            {
+              "id": "tests",
+              "name": "Tests",
+              "command": "swift test",
+              "required": true,
+              "timeoutSeconds": 900
+            }
+          ]
+        }
+        """
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(starter, forType: .string)
+    }
+
     func copyStatusToPasteboard() {
         var lines: [String] = [menuBarTitle]
         if let project = projectContext.projectName {
@@ -1416,8 +1437,13 @@ struct MenuBarPanel: View {
     @State private var presentationID = UUID()
     @State private var agentPane: AgentPane = .codex
 
-    private let panelWidth: CGFloat = 332
-    private let maxPanelHeight: CGFloat = 460
+    @AppStorage("tilde.panel.system.expanded") private var systemExpanded = false
+    @AppStorage("tilde.panel.spend.expanded") private var spendExpanded = false
+    @AppStorage("tilde.panel.context.expanded") private var contextExpanded = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private let panelWidth = TildeDesign.Panel.width
+    private let maxPanelHeight = TildeDesign.Panel.maxHeight
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1440,7 +1466,7 @@ struct MenuBarPanel: View {
         .frame(maxHeight: ReadmeAssetCapture.isRequested ? .infinity : maxPanelHeight)
         .fixedSize(horizontal: true, vertical: ReadmeAssetCapture.isRequested)
         .background {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: TildeDesign.Radius.panel, style: .continuous)
                 .fill(.ultraThinMaterial)
         }
         .onAppear { model.setPresentation(presentationID, isActive: true) }
@@ -1473,7 +1499,8 @@ struct MenuBarPanel: View {
                 .font(.system(size: 15, weight: .semibold, design: .rounded))
                 .foregroundStyle(panelStatusColor)
                 .frame(width: 22, height: 22)
-                .background(Circle().fill(panelStatusColor.opacity(0.16)))
+                .background(Circle().fill(panelStatusColor.opacity(TildeDesign.Opacity.tintBadge)))
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 0) {
                 Text("Tilde")
                     .font(.subheadline.weight(.semibold))
@@ -1528,29 +1555,142 @@ struct MenuBarPanel: View {
                 decisionActivityStrip
             }
 
+            if needsSetup {
+                setupCard
+                    .transition(cardTransition)
+            }
             if model.agentAttention.providerAvailable,
                !model.agentAttention.agents.isEmpty {
                 attentionCard
+                    .transition(cardTransition)
             }
-            if model.verification.state != .dismissed {
+            if model.verification.state != .dismissed,
+               model.verification.state != .unconfigured,
+               model.verification.state != .unavailable {
                 verificationCard
+                    .transition(cardTransition)
             }
 
-            HStack(alignment: .top, spacing: 8) {
-                cpuCard(report)
-                memoryCard(report)
-            }
-            HStack(alignment: .top, spacing: 8) {
-                fanCard
-                VStack(spacing: 8) {
-                    storageCard(report)
-                    networkCard(report.system.network)
+            SectionDisclosureHeader(
+                title: "SYSTEM",
+                summary: systemSummary(report),
+                isExpanded: $systemExpanded
+            )
+            .padding(.horizontal, TildeDesign.Spacing.xs)
+            .padding(.top, TildeDesign.Spacing.xs)
+            if systemExpanded {
+                HStack(alignment: .top, spacing: TildeDesign.Spacing.m) {
+                    cpuCard(report)
+                    memoryCard(report)
+                }
+                HStack(alignment: .top, spacing: TildeDesign.Spacing.m) {
+                    fanCard
+                    VStack(spacing: TildeDesign.Spacing.m) {
+                        storageCard(report)
+                        networkCard(report.system.network)
+                    }
                 }
             }
-            agentCard(report)
-            contextStrip
+
+            SectionDisclosureHeader(
+                title: "AI SPEND",
+                summary: spendSummary(report),
+                isExpanded: $spendExpanded
+            )
+            .padding(.horizontal, TildeDesign.Spacing.xs)
+            if spendExpanded {
+                agentCard(report)
+            }
+
+            SectionDisclosureHeader(
+                title: "CONTEXT",
+                summary: contextSummary,
+                isExpanded: $contextExpanded
+            )
+            .padding(.horizontal, TildeDesign.Spacing.xs)
+            if contextExpanded {
+                contextStrip
+            }
+
             focusStrip
         }
+        .animation(reduceMotion ? nil : TildeDesign.Motion.standard, value: layoutAnimationKey(decisions))
+    }
+
+    private func layoutAnimationKey(_ decisions: [DecisionQueueItem]) -> String {
+        let ids = decisions.map(\.id).joined(separator: "|")
+        return "\(ids)|\(systemExpanded)|\(spendExpanded)|\(contextExpanded)|\(model.verification.state)|\(needsSetup)"
+    }
+
+    private var cardTransition: AnyTransition {
+        reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top))
+    }
+
+    private var needsSetup: Bool {
+        setupSteps.contains { !$0.isDone }
+    }
+
+    private var setupSteps: [SetupStep] {
+        let verificationState = model.verification.state
+        let profileDetail = verificationState == .unavailable
+            ? (model.verification.message
+                ?? "Declare your test and build commands in .tilde/verify.json so receipts bind to this exact change.")
+            : "Declare your test and build commands in .tilde/verify.json so receipts bind to this exact change."
+        return [
+            SetupStep(
+                id: "repository",
+                title: "Open a repository",
+                detail: model.projectContext.detailText,
+                isDone: model.projectContext.hasProject
+            ),
+            SetupStep(
+                id: "agents",
+                title: "Connect an agent runner",
+                detail: "\(model.agentAttention.unavailableReason ?? "Herdr is not connected"). Install Herdr and Tilde lists your agents here.",
+                isDone: model.agentAttention.providerAvailable
+            ),
+            SetupStep(
+                id: "verification",
+                title: "Add a verification profile",
+                detail: profileDetail,
+                isDone: verificationState != .unconfigured && verificationState != .unavailable,
+                actionTitle: "Copy starter",
+                action: { model.copyStarterVerificationProfile() }
+            ),
+        ]
+    }
+
+    private var setupCard: some View {
+        SetupCard(steps: setupSteps, notes: model.decisionQueue.discoveryNotes)
+    }
+
+    private func systemSummary(_ report: DiagnosticReport) -> String {
+        var parts: [String] = []
+        if case .available(let cpu) = report.system.cpu {
+            parts.append("CPU \(percent(cpu.usagePercent))")
+        }
+        if case .available(let memory) = report.system.memory, memory.totalBytes > 0 {
+            parts.append("RAM \(percent(Double(memory.usedBytes) / Double(memory.totalBytes) * 100))")
+        }
+        if case .available(let storage) = report.system.storage, storage.totalBytes > 0 {
+            parts.append("Disk \(percent(Double(storage.usedBytes) / Double(storage.totalBytes) * 100))")
+        }
+        return parts.isEmpty ? "Collecting" : parts.joined(separator: " · ")
+    }
+
+    private func spendSummary(_ report: DiagnosticReport) -> String {
+        let spend = DailyAISpendSummary(
+            codex: report.codex.availableValue?.dailySpend,
+            cursor: report.cursor.availableValue?.dailySpend
+        )
+        let total = spend.knownTotalCents.map {
+            "\(spend.containsEstimate ? "≈" : "")\(DailyAISpendSummary.usd($0))"
+        } ?? "$—"
+        return "\(total) today · \(spend.detailText)"
+    }
+
+    private var contextSummary: String {
+        "\(model.buildPulse.statusText) · \(model.trustPacket.summary)"
     }
 
     @ViewBuilder
@@ -1620,11 +1760,12 @@ struct MenuBarPanel: View {
                             .padding(.vertical, 8)
                             .foregroundStyle(.white)
                             .background(
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                RoundedRectangle(cornerRadius: TildeDesign.Radius.button, style: .continuous)
                                     .fill(tint)
                             )
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("\(primary.title), \(item.projectName)")
 
                     if !item.secondaryActions.isEmpty {
                         HStack(spacing: 8) {
@@ -1638,11 +1779,12 @@ struct MenuBarPanel: View {
                                         .padding(.vertical, 6)
                                         .foregroundStyle(.primary)
                                         .background(
-                                            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                                .fill(Color.primary.opacity(0.06))
+                                            RoundedRectangle(cornerRadius: TildeDesign.Radius.button - 1, style: .continuous)
+                                                .fill(Color.primary.opacity(TildeDesign.Opacity.fillSubtle))
                                         )
                                 }
                                 .buttonStyle(.plain)
+                                .accessibilityLabel("\(action.title), \(item.projectName)")
                             }
                         }
                     }
@@ -1675,6 +1817,7 @@ struct MenuBarPanel: View {
                     .font(.caption2.weight(.semibold))
                     .buttonStyle(.plain)
                     .foregroundStyle(tint)
+                    .accessibilityLabel("\(primary.title), \(item.projectName)")
                 }
             }
         }
@@ -1805,6 +1948,8 @@ struct MenuBarPanel: View {
                     }
                     .buttonStyle(.plain)
                     .help("Focus this agent in Herdr")
+                    .accessibilityLabel("\(agent.projectName), \(agent.agent), \(agent.state.label)")
+                    .accessibilityHint("Focuses this agent in Herdr")
                 }
 
                 if available.count > visible.count {
@@ -2342,11 +2487,15 @@ struct MenuBarPanel: View {
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 5)
                             .background(
-                                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                    .fill(selected ? Color.accentColor.opacity(0.22) : Color.primary.opacity(0.06))
+                                RoundedRectangle(cornerRadius: TildeDesign.Radius.control, style: .continuous)
+                                    .fill(selected
+                                          ? Color.accentColor.opacity(TildeDesign.Opacity.selected)
+                                          : Color.primary.opacity(TildeDesign.Opacity.fillSubtle))
                             )
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("\(mode.title) focus")
+                    .accessibilityAddTraits(selected ? [.isButton, .isSelected] : [.isButton])
                 }
             }
         }
@@ -2535,7 +2684,7 @@ private func compactCodexReset(_ reset: Date, calendar: Calendar = .current) -> 
     return reset.formatted(date: .abbreviated, time: .omitted)
 }
 
-private struct ControlCenterCard<Content: View>: View {
+struct ControlCenterCard<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {

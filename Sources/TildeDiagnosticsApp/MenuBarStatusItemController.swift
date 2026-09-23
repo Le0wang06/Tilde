@@ -31,7 +31,7 @@ final class MenuBarStatusItemController: NSObject {
             popover.behavior = .transient
             popover.animates = true
             // Fit content tightly — a fixed tall size left an empty gap under the panel.
-            popover.contentSize = NSSize(width: 332, height: 420)
+            popover.contentSize = NSSize(width: TildeDesign.Panel.width, height: TildeDesign.Panel.seedHeight)
             let root = MenuBarPanel()
                 .environmentObject(model)
                 .background(
@@ -41,7 +41,7 @@ final class MenuBarStatusItemController: NSObject {
                 )
                 .onPreferenceChange(PanelSizeKey.self) { size in
                     guard size.width > 0, size.height > 0 else { return }
-                    let height = min(ceil(size.height), 460)
+                    let height = min(ceil(size.height), TildeDesign.Panel.maxHeight)
                     self.popover?.contentSize = NSSize(
                         width: ceil(size.width),
                         height: height
