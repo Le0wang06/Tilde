@@ -1,0 +1,91 @@
+name: Bug report
+description: Something in the Tilde menu bar, panel, CLI, or verification flow is wrong.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Tilde is local-first, so please keep the report local-first too:
+        never paste prompts, diffs, terminal output, source code, tokens, or account email.
+        Describe what happened in your own words instead.
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: "macOS 15.5 (24F74)"
+    validations:
+      required: true
+  - type: input
+    id: hardware
+    attributes:
+      label: Apple Silicon model
+      description: Fan control and sensor readings vary by chip.
+      placeholder: "MacBook Pro 14-inch, M3 Pro"
+    validations:
+      required: true
+  - type: dropdown
+    id: agent-runner
+    attributes:
+      label: Agent runner involved
+      description: Which integration was in use when the bug appeared, if any.
+      multiple: true
+      options:
+        - Herdr
+        - Codex
+        - Cursor
+        - None / system-only
+    validations:
+      required: true
+  - type: dropdown
+    id: verify-profile
+    attributes:
+      label: Does the repository have a .tilde/verify.json?
+      options:
+        - "Yes"
+        - "No"
+        - Not sure
+        - Not applicable
+    validations:
+      required: true
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: How was Tilde launched?
+      options:
+        - ./Scripts/install-and-start.sh (login item)
+        - ./Scripts/run-app.sh
+        - swift run (tilde-probe or tilde-fan)
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the panel from the menu bar
+        2. Expand the System section
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Describe what you saw. A screenshot of the panel is fine if it contains no repository content.
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: This report contains no prompts, diffs, command output, source code, tokens, or email addresses.
+          required: true

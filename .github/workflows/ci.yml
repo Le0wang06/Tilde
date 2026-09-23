@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build and test (macOS 15)
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Swift version
+        run: swift --version
+
+      - name: Cache SwiftPM build directory
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: swiftpm-${{ runner.os }}-${{ hashFiles('Package.swift', 'Package.resolved') }}
+          restore-keys: |
+            swiftpm-${{ runner.os }}-
+
+      - name: Build TildeDiagnostics (release)
+        run: swift build -c release --product TildeDiagnostics
+
+      - name: Build tilde-probe
+        run: swift build --product tilde-probe
+
+      # Scripts/test.sh adds Command Line Tools framework paths only when
+      # xcode-select points at CommandLineTools. The runner ships Xcode, so
+      # this resolves to a plain `swift test`.
+      - name: Test
+        run: ./Scripts/test.sh

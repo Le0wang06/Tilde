@@ -1,0 +1,77 @@
+name: Feature request
+description: Propose a change to the panel, menu bar, CLIs, or verification flow.
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Tilde surfaces what agents and the machine are doing without persisting prompts, diffs,
+        terminal output, source, tokens, or email. Proposals that need any of that stored will be
+        declined, so say up front what data the feature would read and what it would keep.
+        Do not paste prompts, diffs, or command output into this form.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is hard or slow today, and when does it happen?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: What should the menu bar, panel, or CLI do instead?
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: true
+      options:
+        - Menu bar title / spend
+        - Needs you decision queue
+        - Attention banners
+        - Exact verification (.tilde/verify.json, receipts)
+        - System HUD (CPU, memory, thermal, storage, network)
+        - Fan control (tilde-fan)
+        - tilde-probe CLI
+        - Deep links (tilde://)
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: agent-runner
+    attributes:
+      label: Agent runner this relates to
+      multiple: true
+      options:
+        - Herdr
+        - Codex
+        - Cursor
+        - None / system-only
+  - type: input
+    id: environment
+    attributes:
+      label: macOS version and Apple Silicon model
+      placeholder: "macOS 15.5, M2 MacBook Air"
+  - type: dropdown
+    id: verify-profile
+    attributes:
+      label: Does this involve a .tilde/verify.json profile?
+      options:
+        - "Yes"
+        - "No"
+        - Not sure
+  - type: textarea
+    id: data
+    attributes:
+      label: Data read and data persisted
+      description: List what the feature would read from disk or local processes, and what (metadata only) it would write under Application Support.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
