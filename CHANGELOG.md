@@ -4,8 +4,10 @@ All notable changes to Tilde are documented here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
-### Added
+## [0.2.0] - 2026-09-23
 
+### Added
+- Downloadable `Tilde.app` archive on every tagged release, built by `Scripts/package-app.sh` and the Release workflow, with a SHA-256 checksum.
 - Setup guidance in the panel when Herdr is not installed, no repository is detected, or the current repository has no `.tilde/verify.json`.
 - Accessibility labels on panel cards, section headers, and actions.
 - Light-mode README captures alongside the dark ones.

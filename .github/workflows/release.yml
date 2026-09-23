@@ -1,0 +1,41 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: Package and publish (macOS 15)
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Swift version
+        run: swift --version
+
+      - name: Test
+        run: ./Scripts/test.sh
+
+      - name: Package Tilde.app
+        run: ./Scripts/package-app.sh "${GITHUB_REF_NAME#v}"
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" \
+            --title "Tilde $VERSION" \
+            --notes-file <(awk -v ver="$VERSION" '
+              $0 ~ "^## \\[" ver "\\]" {p=1; next}
+              /^## \[/ && p {exit}
+              p {print}
+            ' CHANGELOG.md) \
+            "dist/Tilde-${VERSION}.zip" "dist/Tilde-${VERSION}.zip.sha256"
