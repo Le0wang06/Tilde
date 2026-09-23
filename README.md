@@ -78,6 +78,26 @@ That builds `TildeDiagnostics` with SwiftPM, wraps it as `~/Applications/Tilde.a
 
 Panel footer: Open (full diagnostics window), Copy (status summary to the clipboard), Refresh, Quit. Focus modes Ship, Meet, and Battery sit above it.
 
+### Features up close
+
+<table>
+  <tr>
+    <td align="center" width="50%"><img src="Docs/assets/features/needs-you.png" alt="Needs you decision card with one primary action" width="360" /><br/><sub><strong>Needs you.</strong> One card per change: why it needs you, one primary action, the rest secondary.</sub></td>
+    <td align="center" width="50%"><img src="Docs/assets/features/verification.png" alt="Exact verification receipt bound to a fingerprint" width="360" /><br/><sub><strong>Exact verification.</strong> Receipts keyed to the change fingerprint; stale the moment the tree moves.</sub></td>
+  </tr>
+  <tr>
+    <td align="center" width="50%"><img src="Docs/assets/features/agents.png" alt="Agents list with state per project and branch" width="360" /><br/><sub><strong>Agents.</strong> Every Herdr session with its state and branch; click to focus it.</sub></td>
+    <td align="center" width="50%"><img src="Docs/assets/features/setup.png" alt="Get set up checklist" width="360" /><br/><sub><strong>Get set up.</strong> A checklist until a repository, an agent runner, and a verification profile exist.</sub></td>
+  </tr>
+  <tr>
+    <td align="center" width="50%"><img src="Docs/assets/features/system.png" alt="System section with CPU sparkline, RAM, fan boost, disk, and network" width="360" /><br/><sub><strong>System.</strong> CPU sparkline, memory pressure, real SMC fan boost, disk, and network. Collapsed to one line by default.</sub></td>
+    <td align="center" width="50%"><img src="Docs/assets/features/spend.png" alt="AI spend today with Codex rate-limit windows" width="360" /><br/><sub><strong>AI spend.</strong> Today's Cursor and Codex cost with the 5-hour and 7-day Codex windows and reset times.</sub></td>
+  </tr>
+  <tr>
+    <td align="center" width="50%" colspan="2"><img src="Docs/assets/features/context.png" alt="Context rows for build, project, trust, today, and resume" width="360" /><br/><sub><strong>Context.</strong> Build, project, trust, today's diary, and where to resume.</sub></td>
+  </tr>
+</table>
+
 ## How it works
 
 ```mermaid
