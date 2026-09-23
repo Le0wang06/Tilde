@@ -15,16 +15,15 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build tests
         run: swift build --build-tests
-      - name: Run each test file with a 4 minute limit
+      - name: Run each VerificationReceiptTests test with a 2 minute limit
         run: |
           set +e
           brew list coreutils >/dev/null 2>&1 || brew install coreutils >/dev/null 2>&1
-          for f in Tests/TildeCoreTests/*.swift; do
-            names=$(grep -oE 'func [A-Za-z0-9_]+\(' "$f" | sed -E 's/func ([A-Za-z0-9_]+)\(/\1/' | paste -sd'|' -)
-            [ -z "$names" ] && continue
+          for name in $(grep -oE 'func [A-Za-z0-9_]+\(' Tests/TildeCoreTests/VerificationReceiptTests.swift | sed -E 's/func ([A-Za-z0-9_]+)\(/\1/'); do
             start=$(date +%s)
-            gtimeout 240 swift test --skip-build --disable-xctest --enable-swift-testing --filter "$names" > /tmp/out.txt 2>&1
+            gtimeout 120 swift test --skip-build --disable-xctest --enable-swift-testing --filter "$name" > /tmp/out.txt 2>&1
             rc=$?
-            echo "== $(basename $f): rc=$rc in $(( $(date +%s) - start ))s"
-            grep -E '◇ Test .* started|✔ Test run|✘' /tmp/out.txt | tail -3
+            echo "== $name: rc=$rc in $(( $(date +%s) - start ))s"
+            grep -vE 'Compiling|Build complete|Building' /tmp/out.txt | tail -8
           done
+          echo "== git version: $(git --version)"; echo "== zsh: $(zsh --version)"; echo "== HOME=$HOME"; ls -la /etc/zshenv /etc/zshrc /etc/zprofile 2>/dev/null; cat /etc/zshenv 2>/dev/null | head -20
