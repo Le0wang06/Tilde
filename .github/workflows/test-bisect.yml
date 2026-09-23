@@ -1,0 +1,30 @@
+name: Test bisect
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bisect:
+    name: Per-file test timing (macOS 15)
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build tests
+        run: swift build --build-tests
+      - name: Run each test file with a 4 minute limit
+        run: |
+          set +e
+          brew list coreutils >/dev/null 2>&1 || brew install coreutils >/dev/null 2>&1
+          for f in Tests/TildeCoreTests/*.swift; do
+            names=$(grep -oE 'func [A-Za-z0-9_]+\(' "$f" | sed -E 's/func ([A-Za-z0-9_]+)\(/\1/' | paste -sd'|' -)
+            [ -z "$names" ] && continue
+            start=$(date +%s)
+            gtimeout 240 swift test --skip-build --disable-xctest --enable-swift-testing --filter "$names" > /tmp/out.txt 2>&1
+            rc=$?
+            echo "== $(basename $f): rc=$rc in $(( $(date +%s) - start ))s"
+            grep -E '◇ Test .* started|✔ Test run|✘' /tmp/out.txt | tail -3
+          done
