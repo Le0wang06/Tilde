@@ -1,57 +1,96 @@
 <p align="center">
-  <img src="Docs/assets/tilde-logo.png" alt="Tilde" width="128" />
+  <img src="Docs/assets/tilde-logo.png" alt="Tilde" width="64" />
 </p>
 
 <h1 align="center">Tilde</h1>
 
+<p align="center">A native macOS menu bar for people who run AI coding agents.</p>
+
 <p align="center">
-  <strong>The menu bar for people who run AI coding agents.</strong><br/>
-  Agents finish. Checks pass. Something blocks. Tilde tells you what needs you next.
+  <a href="#install"><strong>Get Tilde for macOS ↗</strong></a>
+  &nbsp; · &nbsp; <a href="#features">Take a look</a>
+  &nbsp; · &nbsp; <a href="#install">Build it yourself</a>
+  &nbsp; · &nbsp; <a href="#privacy">Privacy</a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/Le0wang06/Tilde/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/Le0wang06/Tilde?style=flat-square&color=111" /></a>
-  <a href="https://github.com/Le0wang06/Tilde/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/Le0wang06/Tilde/ci.yml?branch=main&style=flat-square&label=CI" /></a>
-  <img alt="macOS 14+" src="https://img.shields.io/badge/macOS-14%2B-black?style=flat-square&logo=apple&logoColor=white" />
-  <img alt="Swift 6" src="https://img.shields.io/badge/Swift-6-F05138?style=flat-square&logo=swift&logoColor=white" />
-  <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-2ea44f?style=flat-square" /></a>
+  <img src="Docs/assets/tilde-hero.png" alt="Tilde app preview with dark and light menu-bar panels, decision cards, agents, and verification receipts." width="1100" />
 </p>
+
+<p align="center"><sub>Original app preview with demo data. Local-first refers to storage; provider usage requests still use the network.</sub></p>
+
+You have agents working across repositories. One is blocked, another is ready for review, and the checks you ran before your last edit no longer describe the code in front of you.
+
+**Tilde gives you a place to decide what happens next.** Open the menu bar, see the change that needs you, and jump back into the work. Leave the rest running.
 
 <p align="center">
-  <a href="https://github.com/Le0wang06/Tilde/releases/latest"><strong>Download for macOS</strong></a>
-  &nbsp;·&nbsp;
-  <a href="#install">Install</a>
-  &nbsp;·&nbsp;
-  <a href="#features">Features</a>
-  &nbsp;·&nbsp;
-  <a href="#how-it-works">How it works</a>
-  &nbsp;·&nbsp;
-  <a href="#privacy">Privacy</a>
-  &nbsp;·&nbsp;
-  <a href="#faq">FAQ</a>
+  <sub>macOS 14+ &nbsp; / &nbsp; Swift 6.1 &nbsp; / &nbsp; <a href="LICENSE">MIT licensed</a> &nbsp; / &nbsp; <a href="https://github.com/Le0wang06/Tilde/actions/workflows/ci.yml">Build status</a></sub>
 </p>
+
+## Features
 
 <p align="center">
-  <img src="Docs/assets/tilde-hero.png" alt="Tilde menu bar panel in dark and light mode" width="920" />
+  <picture>
+    <source media="(max-width: 600px)" srcset="Docs/assets/showcase/cover-mobile.svg" />
+    <img src="Docs/assets/showcase/cover.svg" alt="Parallel Herdr agents feed a change-centered Needs you queue. Open the agent, review, or run checks. After a code change, stale receipts need new checks." width="1100" />
+  </picture>
 </p>
 
-<br/>
+### Your attention has a queue now.
 
-Run Codex, Cursor, and Claude Code in parallel and the scarce resource is no longer compute. It is your attention. Tilde lives in the macOS menu bar and answers one question at a glance: **which change needs a human decision right now, and is the evidence for it still valid?**
+The **Needs you** view groups work around a change, with the reason it needs attention and one primary next action. Open the agent, inspect the change, or run its checks. Working and idle changes stay in a compact strip underneath.
 
-- **Decisions first.** One card per change, ranked by what needs you. Blocked agents outrank failed checks, which outrank ready-for-review.
-- **Evidence you can trust.** Test and build receipts are bound to a SHA-256 fingerprint of the exact change and go stale the moment the tree moves.
-- **Nothing leaves your Mac.** No prompts, diffs, terminal output, tokens, or account email are ever stored. Metadata only.
+<p align="center">
+  <img src="Docs/assets/showcase/decision-card.svg" alt="Illustrated decision card: storefront checks failed. Run Checks is the primary action; Review, Open Agent, and Open PR are secondary actions." width="640" />
+  <br/><sub>Decision-card illustration. See the full-panel screenshots below for the app itself.</sub>
+</p>
 
-<br/>
+Agent notifications happen on meaningful state transitions, after an initial silent baseline. A blocked or finished agent can bring you back to its session; unchanged polling does not keep announcing itself.
+
+> Agent sessions and focus actions currently use **Herdr**. Verification, AI spend, and machine health also work without an agent runner.
+
+### A green check should mean *this* code.
+
+Run the checks declared in your repository’s `.tilde/verify.json`. Tilde records the outcome against a fingerprint of the change and verification profile. When a refreshed fingerprint differs, the old receipt becomes **stale**.
+
+**Verified → edit → stale → re-run.** A new commit, a working-tree edit, or a changed profile requires new evidence. Commands are shown before you trust and run them; a passing receipt is evidence for the declared checks, not a guarantee that the change is correct.
+
+<details>
+<summary>See the verification receipt</summary>
+
+<p align="center">
+  <img src="Docs/assets/features/verification.png" alt="Exact verification receipt with a fingerprint, passing Tests and Build checks, durations, and a Run Again action." width="480" />
+</p>
+
+</details>
+
+### The rest stays within reach.
+
+**Cost, without another dashboard.** Today’s observed Cursor spend and estimated Codex spend live in the menu bar. Open AI SPEND for the Codex 5-hour and 7-day windows and their reset times, when available.
+
+**Machine health, one line away.** CPU, memory pressure, disk, network, and fan controls stay in a collapsed system section until you need them.
+
+**A first run with a next step.** Setup guides you through opening a repository, connecting an agent runner, and adding a verification profile. Copy starter gives you a profile to start from.
+
+<details>
+<summary><strong>Explore the full panel · light and dark</strong></summary>
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="Docs/assets/tilde-panel-dark.png" />
+    <img src="Docs/assets/tilde-panel-light.png" alt="Full Tilde panel with the decision queue, Herdr agent sessions, exact verification, and collapsed system and spend sections." width="360" />
+  </picture>
+</p>
+
+[Light appearance](Docs/assets/tilde-panel-light.png) · [Dark appearance](Docs/assets/tilde-panel-dark.png) · [Expanded sections](Docs/assets/tilde-panel-dark-expanded.png) · [First run](Docs/assets/tilde-panel-first-run.png)
+
+</details>
+
+<sub>App screenshots show illustrative demo data. Availability depends on connected providers and your Mac.</sub>
+
+---
 
 ## Install
-
-### Download
-
-1. Grab `Tilde-x.y.z.zip` from the [latest release](https://github.com/Le0wang06/Tilde/releases/latest) and unzip it.
-2. Move `Tilde.app` to `~/Applications` (or `/Applications`).
-3. First launch: right-click the app and choose **Open**. The build is signed ad hoc, not notarized, so macOS asks once.
 
 ### Build from source
 
@@ -61,7 +100,16 @@ cd Tilde
 ./Scripts/install-and-start.sh
 ```
 
-That builds with SwiftPM, wraps `~/Applications/Tilde.app`, registers a login LaunchAgent, and opens it. Requires the Swift 6 toolchain; Command Line Tools are enough, Xcode is optional.
+That builds with SwiftPM, wraps `~/Applications/Tilde.app`, registers a login LaunchAgent, and opens it. Requires the Swift 6.1 toolchain; Command Line Tools are enough, Xcode is optional.
+
+<details>
+<summary>Release archives and first launch</summary>
+
+There is no published GitHub release yet; build from source above. When an archive is available on the [releases page](https://github.com/Le0wang06/Tilde/releases), unzip it and move `Tilde.app` to `~/Applications` or `/Applications`.
+
+Packaged builds are signed ad hoc, not notarized. On first launch, right-click the app and choose **Open**.
+
+</details>
 
 ### Uninstall
 
@@ -71,64 +119,6 @@ That builds with SwiftPM, wraps `~/Applications/Tilde.app`, registers a login La
 ```
 
 **Requirements:** macOS 14 Sonoma or later, Apple Silicon (Intel builds are untested). Agent cards need [Herdr](#faq); spend, system, and verification work without it.
-
-<br/>
-
-## Features
-
-<table>
-  <tr>
-    <td width="50%" valign="top">
-      <img src="Docs/assets/features/needs-you.png" alt="Needs you decision card" width="100%" />
-      <h3>Needs you</h3>
-      <p>One card per change, not per process. Why it needs you, one primary action, secondary actions a tap away. Everything else collapses into a single working and idle strip.</p>
-    </td>
-    <td width="50%" valign="top">
-      <img src="Docs/assets/features/verification.png" alt="Exact verification receipt" width="100%" />
-      <h3>Exact verification</h3>
-      <p>Run the repository's own checks and get a receipt keyed to the change fingerprint. A new commit, a saved file, or an edited profile marks it stale until you run again.</p>
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <img src="Docs/assets/features/agents.png" alt="Agent list" width="100%" />
-      <h3>Agents at a glance</h3>
-      <p>Every Herdr session with its state and branch. Native banners with sound fire on transitions only, so idle monitoring never interrupts. Click to focus the agent.</p>
-    </td>
-    <td width="50%" valign="top">
-      <img src="Docs/assets/features/spend.png" alt="AI spend and Codex windows" width="100%" />
-      <h3>AI spend, always on</h3>
-      <p>Today's Cursor and Codex cost as the menu bar title, with the 5-hour and 7-day Codex windows and their reset times one click away.</p>
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <img src="Docs/assets/features/system.png" alt="System section" width="100%" />
-      <h3>Machine health, out of the way</h3>
-      <p>CPU sparkline, memory pressure, disk, network, and real SMC fan control. Collapsed to one line by default so the panel fits without scrolling.</p>
-    </td>
-    <td width="50%" valign="top">
-      <img src="Docs/assets/features/setup.png" alt="Get set up checklist" width="100%" />
-      <h3>Guided first run</h3>
-      <p>A checklist stays until a repository is open, an agent runner is connected, and a verification profile exists. Copy starter puts a working profile on the clipboard.</p>
-    </td>
-  </tr>
-</table>
-
-<details>
-<summary><strong>More screenshots</strong></summary>
-<br/>
-<p align="center">
-  <img src="Docs/assets/tilde-menubar.png" alt="Tilde in the macOS menu bar" width="920" />
-</p>
-<table>
-  <tr>
-    <td align="center" width="33%"><img src="Docs/assets/tilde-panel-dark.png" alt="Default panel, dark" width="300" /><br/><sub>Default, dark</sub></td>
-    <td align="center" width="33%"><img src="Docs/assets/tilde-panel-light.png" alt="Default panel, light" width="300" /><br/><sub>Default, light</sub></td>
-    <td align="center" width="33%"><img src="Docs/assets/tilde-panel-dark-expanded.png" alt="Expanded panel" width="300" /><br/><sub>All sections expanded</sub></td>
-  </tr>
-</table>
-</details>
 
 <br/>
 
@@ -146,6 +136,7 @@ flowchart LR
     F[Change fingerprint]
     V[Verification receipts]
     Q[Decision queue]
+    U[Usage and spend]
   end
   subgraph surface [Surface]
     M[Menu bar]
@@ -153,20 +144,24 @@ flowchart LR
     D[tilde:// links]
   end
   H --> Q
-  C --> Q
-  K --> Q
+  C --> U
+  K --> U
+  U --> M
   G --> F --> V --> Q
   Q --> M
-  Q --> B
+  H --> B
   Q --> D
 ```
 
 | Idea | What it means in practice |
 | --- | --- |
 | **Change fingerprint** | SHA-256 over `HEAD`, the merge-base against the profile's base ref, staged and unstaged diffs, untracked file contents, submodule state, and the profile hash. |
-| **Receipts that go stale** | A receipt is valid only for the fingerprint it was collected against. Move the tree and the card says so. |
+| **Receipts that go stale** | A receipt is valid only for the fingerprint it was collected against. A refreshed fingerprint marks outdated evidence stale. |
 | **Trust on first use** | Commands come from the repository's `.tilde/verify.json`, are shown verbatim, and run only after you click Trust & Run for that repository and profile hash. |
 | **Needs-you ranking** | Blocked agent, then failed or missing verification, then ready-but-unverified, then verified and ready for review. |
+
+<details>
+<summary><strong>Configure repository checks and understand receipt states</strong></summary>
 
 ### Verification profile
 
@@ -195,11 +190,13 @@ Declare the checks a repository trusts in `.tilde/verify.json`. Tilde verifies i
 
 Check output is shown while a check runs and is never persisted. Clean, low risk, and verified are separate facts and are labeled separately.
 
+</details>
+
 <br/>
 
 ## Usage
 
-**Menu bar.** The title is today's estimated AI spend, for example `≈$4.38`. When a change needs a decision it becomes `! ≈$4.38` and a banner posts once.
+**Menu bar.** The title combines observed Cursor spend and estimated Codex spend for today, for example `≈$4.38`. Agent attention adds `!` to the title. Agent-state transitions can trigger a banner when notifications are permitted; verification failures are visible in the decision queue.
 
 **Panel.** Needs-you cards, then the agents list and verification receipt, then SYSTEM, AI SPEND, and CONTEXT as one-line summaries that expand on click. Focus modes and Open, Copy, Refresh, Quit sit at the bottom.
 
@@ -221,7 +218,7 @@ Check output is shown while a check runs and is never persisted. Clean, low risk
 
 ## Privacy
 
-Tilde is local-first. It does **not** store prompts, diffs, terminal output, source code, authentication tokens, or account email. The Cursor token is read into memory for one request and discarded; Codex app-server output is parsed for token counts only; Herdr output is reduced to agent state.
+Tilde is local-first. It does **not** store prompts, diffs, terminal output, source code, authentication tokens, or account email. Cursor credentials are read locally and used in memory to request membership and usage information directly from Cursor over HTTPS. Codex usage is read through its local app server; Herdr output is reduced to agent state. Local-first describes Tilde’s storage model, not an absence of provider network requests.
 
 Everything Tilde keeps lives in `~/Library/Application Support/Tilde`: spend counters, verification receipts (check ids, command hashes, outcomes, timestamps, fingerprints), trusted profile hashes, decision-queue entries, diary summaries, and recovery hints. Every pull request that writes a new value to disk must say so under "Privacy impact". Remove it all with `./Scripts/uninstall.sh --purge`.
 
@@ -231,7 +228,7 @@ Everything Tilde keeps lives in `~/Library/Application Support/Tilde`: spend cou
 
 **No agents are shown.** Tilde reads agent state from Herdr. Install Herdr and start an agent; the Get set up checklist clears once the runner is connected.
 
-**Cursor spend is missing.** Sign in to Cursor on this Mac. Tilde reads the local plan through Cursor's own state store.
+**Cursor spend is missing.** Sign in to Cursor on this Mac. Tilde reads credentials from Cursor’s local state store and requests membership and usage directly from Cursor.
 
 **Codex windows say unavailable.** The Codex app server is not reachable or has not reported a window yet. Tilde labels what it cannot measure instead of guessing.
 
