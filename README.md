@@ -41,7 +41,8 @@ You have agents working across repositories. One is blocked, another is ready fo
 The **Needs you** view groups work around a change, with the reason it needs attention and one primary next action. Open the agent, inspect the change, or run its checks. Working and idle changes stay in a compact strip underneath.
 
 <p align="center">
-  <img src="Docs/assets/features/needs-you.png" alt="Tilde decision queue: a storefront change needs checks, checkout-api is ready for review, and other changes are collapsed." width="480" />
+  <img src="Docs/assets/showcase/decision-card.svg" alt="Illustrated decision card: storefront checks failed. Run Checks is the primary action; Review, Open Agent, and Open PR are secondary actions." width="640" />
+  <br/><sub>Decision-card illustration. See the full-panel screenshots below for the app itself.</sub>
 </p>
 
 Agent notifications happen on meaningful state transitions, after an initial silent baseline. A blocked or finished agent can bring you back to its session; unchanged polling does not keep announcing itself.
