@@ -42,5 +42,8 @@ jobs:
       # Scripts/test.sh adds Command Line Tools framework paths only when
       # xcode-select points at CommandLineTools. The runner ships Xcode, so
       # this resolves to a plain `swift test`.
+      # The suite is swift-testing only. The XCTest runner hangs before printing
+      # anything on the hosted macOS runner, so it is disabled here explicitly.
       - name: Test
-        run: ./Scripts/test.sh
+        timeout-minutes: 20
+        run: swift test --disable-xctest --enable-swift-testing
