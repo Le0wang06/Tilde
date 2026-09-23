@@ -73,9 +73,15 @@ public actor VerificationCommandRunner {
             flags.markTimedOut()
             terminateProcessGroup(child.pid)
         }
-        let waitResult = await Task.detached(priority: .utility) {
-            waitForChild(child.pid)
-        }.value
+        // waitpid blocks. Run it on a dedicated thread rather than the cooperative
+        // pool so a handful of concurrent checks can never starve the timeout task
+        // that terminates the process group.
+        let waitResult = await withCheckedContinuation { (continuation: CheckedContinuation<ChildWaitResult, Never>) in
+            let pid = child.pid
+            Thread.detachNewThread {
+                continuation.resume(returning: waitForChild(pid))
+            }
+        }
         flags.markFinished()
         timeoutTask.cancel()
         await cleanUpProcessGroup(child.pid)

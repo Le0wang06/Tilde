@@ -46,4 +46,4 @@ jobs:
       # anything on the hosted macOS runner, so it is disabled here explicitly.
       - name: Test
         timeout-minutes: 20
-        run: swift test --disable-xctest --enable-swift-testing
+        run: swift test --no-parallel --disable-xctest --enable-swift-testing

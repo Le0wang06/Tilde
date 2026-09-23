@@ -22,7 +22,7 @@ jobs:
 
       - name: Test
         timeout-minutes: 20
-        run: swift test --disable-xctest --enable-swift-testing
+        run: swift test --no-parallel --disable-xctest --enable-swift-testing
 
       - name: Package Tilde.app
         run: ./Scripts/package-app.sh "${GITHUB_REF_NAME#v}"
